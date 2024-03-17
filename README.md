@@ -66,7 +66,6 @@ No need to restart the script.
 - [ ] Include version checking for this script
 - [ ] Auto-update this script
 - [ ] Improved text formatting
-- [ ] 
 
 ## Disclaimer
 By using this script, you are indicating your agreement to the [Minecraft EULA](https://aka.ms/MinecraftEULA).
