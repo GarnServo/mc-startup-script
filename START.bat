@@ -1,6 +1,6 @@
 @echo off
 title Checking dependencies...
-set scriptversion=0.1
+set scriptversion=1.1.0
 
 REM Set restart counter variables
 set "restartCount=0"
@@ -23,6 +23,19 @@ if not exist .\config\StartupScript.conf (
 
 :initiateServer
 title Initiating server...
+
+REM Check for updates to this script.
+for /f "delims=" %%a in ('powershell -Command "(Invoke-WebRequest -Uri 'https://api.github.com/repos/GarnServo/mc-startup-script/releases/latest').Content | ConvertFrom-Json | Select -ExpandProperty tag_name"') do set latestVersion=%%a
+echo Current script version: %scriptVersion%
+echo Latest version from GitHub: %latestVersion%
+REM Check if the script version is greater than the latest version
+if "%latestVersion%" LSS "v%scriptVersion%" (
+    echo You have the latest version of the script.
+) else (
+    echo An update is available for the script ^(version "%latest_version%"^). Please visit the GitHub page for more details:
+    echo https://github.com/GarnServo/mc-startup-script/releases/latest
+)
+
 REM Check EULA exists, if not, go to create it (and accept it)
 if not exist "eula.txt" (
     goto eula
