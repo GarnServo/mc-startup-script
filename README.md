@@ -14,6 +14,7 @@
 4️⃣ Auto-generate+accept EULA  
 5️⃣ GUI toggle  
 6️⃣ Customisable console title  
+7️⃣ Checks for new versions of this script
 
 ## Requirements
 - Windows OS
@@ -49,6 +50,7 @@ No need to restart the script.
 - [X] Stores configuration in /config/StartupScript.conf, and JVM args in /config/jvm_args.txt.
 - [X] Generates auto-accepted EULA.
 ### Normal Startup
+- [X] Checks for updates to this script.
 - [X] Checks for config folder, config file, and sets restart counter. If config is missing, reverts back to initial setup.
 - [X] Checks for EULA, if non-existent, creates accepted eula.txt.
 - [X] Reads script config file and stores contents as environment variables.
@@ -63,8 +65,6 @@ No need to restart the script.
 - [X] Upon crash or restart, prompts user whether to restart or exit.  
 
 ### Planned
-- [ ] Include version checking for this script
-- [ ] Auto-update this script
 - [ ] Improved text formatting
 
 ## Disclaimer
