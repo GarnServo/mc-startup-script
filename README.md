@@ -28,7 +28,10 @@ To apply configuration changes while the script is still running (i.e. console i
 No need to restart the script.
 
 ## Screenshots
-Coming soon...
+
+![Configuration Screenshot](https://raw.githubusercontent.com/GarnServo/mc-startup-script/main/imgs/Config.png)
+
+![Console Screenshot](https://raw.githubusercontent.com/GarnServo/mc-startup-script/main/imgs/Console_launch.png)
 
 ## Disclaimer
 By using this script, you are indicating your agreement to the [Minecraft EULA](https://aka.ms/MinecraftEULA).
