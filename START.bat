@@ -2,6 +2,10 @@
 title Checking dependencies...
 set scriptversion=0.1
 
+REM Set restart counter variables
+set "restartCount=0"
+set "restartTime=No restarts yet..."
+
 REM Check if the scripts utility folder exists, if not, create it.
 if not exist "config" (
     mkdir config
@@ -14,10 +18,6 @@ if not exist .\config\StartupScript.conf (
 ) else (
     goto initiateServer
 )
-
-REM Set restart counter variables
-set "restartCount=0"
-set "restartTime=No restarts yet..."
 
 
 
@@ -42,6 +42,7 @@ echo [1;4;33mInitial RAM[0m: [33m%iniRam% [0;1m^| [1;4;33mMaximum RAM[0m: 
 echo [1;4;33mAuto-restart[0m: [33m%autoRestart%[0m
 echo [1;4;33mServer GUI[0m: [33m%GUI%[0m
 echo [1;32m.............................................[0m
+echo Server initialising...
 
 REM Set RAM values
 set RAM=-Xmx%maxRam% -Xms%iniRam%
@@ -220,5 +221,5 @@ echo #By changing the setting below to TRUE you are indicating your agreement to
 echo #Auto-accepted EULA with startup script made by Garn Servo. >> eula.txt
 echo eula=true>> eula.txt
 echo [32mEULA created and accepted.[0m
-
+cls
 goto initiateServer
