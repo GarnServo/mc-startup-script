@@ -1,6 +1,6 @@
 @echo off
 title Checking dependencies...
-set scriptVersion=v1.2.0
+set scriptVersion=v1.2.1
 
 REM Set restart counter variables
 set "restartCount=0"
