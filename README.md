@@ -14,7 +14,7 @@
 4️⃣ Auto-generate+accept EULA  
 5️⃣ GUI toggle  
 6️⃣ Customisable console title  
-7️⃣ Checks for new versions of this script
+7️⃣ Auto-updates with latest version from GitHub
 
 ## Requirements
 - Windows OS
@@ -65,7 +65,7 @@ No need to restart the script.
 - [X] Upon crash or restart, prompts user whether to restart or exit.  
 
 ### Planned
-- [ ] Improved text formatting
+- [ ] Improve text formatting
 
 ## Disclaimer
 By using this script, you are indicating your agreement to the [Minecraft EULA](https://aka.ms/MinecraftEULA).
