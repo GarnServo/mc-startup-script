@@ -1,6 +1,6 @@
 @echo off
 title Checking dependencies...
-set scriptversion=1.1.0
+set scriptVersion=v1.2.0
 
 REM Set restart counter variables
 set "restartCount=0"
@@ -16,25 +16,42 @@ REM Check if script config file exists, if not, go to create it.
 if not exist .\config\StartupScript.conf (
     goto initialSetup
 ) else (
-    goto initiateServer
+    goto scriptUpdater
 )
 
-
-
-:initiateServer
-title Initiating server...
+:scriptUpdater
+title Checking for updates...
 
 REM Check for updates to this script.
 for /f "delims=" %%a in ('powershell -Command "(Invoke-WebRequest -Uri 'https://api.github.com/repos/GarnServo/mc-startup-script/releases/latest').Content | ConvertFrom-Json | Select -ExpandProperty tag_name"') do set latestVersion=%%a
 echo Current script version: %scriptVersion%
 echo Latest version from GitHub: %latestVersion%
 REM Check if the script version is greater than the latest version
-if "%latestVersion%" LSS "v%scriptVersion%" (
+if "%latestVersion%" LSS "%scriptVersion%" (
     echo You have the latest version of the script.
+    goto initiateServer
 ) else (
-    echo An update is available for the script ^(version "%latest_version%"^). Please visit the GitHub page for more details:
-    echo https://github.com/GarnServo/mc-startup-script/releases/latest
+    echo An update is available for the script ^(version "%latestVersion%"^).
+    echo Do you want to update? (Y/N)
+    choice /C YN /M "Update script (Y/N): "
+    if errorlevel 2 goto initiateServer
+    if errorlevel 1 (
+        echo @echo off > UpdateStartupScript.bat
+        echo title Updating startup script... > UpdateStartupScript.bat
+        echo powershell -Command "(Invoke-WebRequest -Uri 'https://github.com/GarnServo/mc-startup-script/releases/latest/download/START.bat' -OutFile 'START.bat')" >> UpdateStartupScript.bat
+        echo start START.bat >> UpdateStartupScript.bat
+        echo exit >> UpdateStartupScript.bat
+        start UpdateStartupScript.bat
+        exit
+    )
 )
+
+
+
+:initiateServer
+title Initiating server...
+REM Cleanup updater
+if exist UpdateStartupScript.bat del UpdateStartupScript.bat
 
 REM Check EULA exists, if not, go to create it (and accept it)
 if not exist "eula.txt" (
@@ -90,7 +107,7 @@ set /A restartCount+=1
 set "restartTime=%TIME%, %DATE%"
 echo Server has closed or crashed...restarting now...
 echo Server has restarted %restartCount% times. Last restart: %restartTime%
-goto initiateServer
+goto scriptUpdater
 
 :runNoRestart
 title %Title%
@@ -99,7 +116,7 @@ echo.
 echo.
 echo Server has closed or crashed.
 CHOICE /N /C YN /M "Do you want to restart the server? (Y/N): "
-if %errorlevel%==1 goto initiateServer
+if %errorlevel%==1 goto scriptUpdater
 if %errorlevel%==2 (
     echo You chose not to restart the server.
     echo Press any key to exit.
@@ -235,4 +252,4 @@ echo #Auto-accepted EULA with startup script made by Garn Servo. >> eula.txt
 echo eula=true>> eula.txt
 echo [32mEULA created and accepted.[0m
 cls
-goto initiateServer
+goto scriptUpdater
