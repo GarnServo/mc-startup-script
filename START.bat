@@ -27,12 +27,11 @@ for /f "delims=" %%a in ('powershell -Command "(Invoke-WebRequest -Uri 'https://
 echo Current script version: %scriptVersion%
 echo Latest version from GitHub: %latestVersion%
 REM Check if the script version is greater than the latest version
-if "%latestVersion%" LSS "%scriptVersion%" (
+if %latestVersion% LEQ %scriptVersion% (
     echo You have the latest version of the script.
     goto initiateServer
 ) else (
     echo An update is available for the script ^(version "%latestVersion%"^).
-    echo Do you want to update? (Y/N)
     choice /C YN /M "Update script (Y/N): "
     if errorlevel 2 goto initiateServer
     if errorlevel 1 (
