@@ -1,6 +1,7 @@
 @echo off
 title Checking dependencies...
 set scriptVersion=v1.2.2
+set currentConfigVersion=v1.2.2
 
 REM Set restart counter variables
 set "restartCount=0"
@@ -16,7 +17,24 @@ REM Check if script config file exists, if not, go to create it.
 if not exist .\config\StartupScript.conf (
     goto initialSetup
 ) else (
-    goto scriptUpdater
+    REM Check configuration version
+    set "configVersion="
+    for /f "tokens=1,* delims==" %%a in ('type .\config\StartupScript.conf') do (
+        if "%%a"=="configVersion" (
+            set "configVersion=%%b"
+            goto configVersionFound
+        )
+    )
+    :configVersionFound
+    REM Compare with expected version
+    if "%configVersion%" NEQ "%currentConfigVersion%" (
+        echo [1;31mFollowing an update, your configuration file is outdated.[0m
+        echo [1mPress any key to update your configuration...
+        pause >nul
+        goto initialSetup
+    ) else (
+        goto scriptUpdater
+    )
 )
 
 :scriptUpdater
@@ -208,7 +226,9 @@ if %errorlevel%==2 goto initialSetup
 
 :saveSetup
 title Saving setup...
-echo #  > .\config\StartupScript.conf
+echo # Configuration File Version > .\config\StartupScript.conf
+echo configVersion=%currentConfigVersion%>> .\config\StartupScript.conf
+echo #  >> .\config\StartupScript.conf
 echo # --------------------------------------------------------------------------------------------------------------------------- >> .\config\StartupScript.conf
 echo #                                         Change the values in the section below >> .\config\StartupScript.conf
 echo # --------------------------------------------------------------------------------------------------------------------------- >> .\config\StartupScript.conf
