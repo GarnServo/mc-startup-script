@@ -13,7 +13,7 @@
 3️⃣ Customisable RAM allocation  
 4️⃣ Auto-generate+accept EULA  
 5️⃣ GUI toggle  
-6️⃣ Customisable console title 
+6️⃣ Customisable console title  
 7️⃣ Discord webhook integration  
 8️⃣ Auto-updates with latest version from GitHub
 
