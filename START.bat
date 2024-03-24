@@ -1,6 +1,6 @@
 @echo off
 title Checking dependencies...
-set scriptVersion=v1.3.0
+set scriptVersion=v1.3.1
 set currentConfigVersion=v1.3.0
 
 REM Set restart counter variables
@@ -88,6 +88,11 @@ echo [1;4;33mServer[0m: [33m%serverName%[0m
 echo [1;4;33mInitial RAM[0m: [33m%iniRam% [0;1m^| [1;4;33mMaximum RAM[0m: [33m%maxRam%[0m
 echo [1;4;33mAuto-restart[0m: [33m%autoRestart%[0m
 echo [1;4;33mServer GUI[0m: [33m%GUI%[0m
+if not "%webhookURL%"=="" (
+    echo [1;4;33mDiscord Webhook[0m: [33mconfigured[0m
+) else (
+    echo [1;4;33mDiscord Webhook[0m: [33mnot configured[0m
+)
 echo [1;32m.............................................[0m
 echo Server initialising...
 
@@ -245,6 +250,11 @@ echo [1;4;33mServer[0m: [33m%serverName%[0m
 echo [1;4;33mInitial RAM[0m: [33m%iniRam% [0;1m^| [1;4;33mMaximum RAM[0m: [33m%maxRam%[0m
 echo [1;4;33mAuto-restart[0m: [33m%autoRestart%[0m
 echo [1;4;33mServer GUI[0m: [33m%GUI%[0m
+if not "%webhookURL%"=="" (
+    echo [1;4;33mDiscord Webhook[0m: [33mconfigured[0m
+) else (
+    echo [1;4;33mDiscord Webhook[0m: [33mnot configured[0m
+)
 echo [1;32m.............................................[0m
 CHOICE /N /C:YN /M "These are your desired settings? (Y/N): "
 if %errorlevel%==1 goto saveSetup
