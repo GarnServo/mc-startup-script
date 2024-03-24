@@ -1,7 +1,7 @@
 @echo off
 title Checking dependencies...
-set scriptVersion=v1.2.2
-set currentConfigVersion=v1.2.2
+set scriptVersion=v1.3.0
+set currentConfigVersion=v1.3.0
 
 REM Set restart counter variables
 set "restartCount=0"
@@ -117,6 +117,11 @@ if "%autoRestart%"=="true" (
 
 :runRestart
 title %Title% ^| Restarted: %restartCount% times
+REM Check if webhook URL is set and send start message
+if not "%webhookURL%"=="" (
+    curl -H "Content-Type: application/json" -X POST -d "{\"content\":\"%webhookMessageStart%\"}" %webhookURL%
+)
+REM Start the server
 java %RAM% %args% -jar %serverName% %GUI%
 echo.
 echo.
@@ -124,13 +129,25 @@ set /A restartCount+=1
 set "restartTime=%TIME%, %DATE%"
 echo Server has closed or crashed...restarting now...
 echo Server has restarted %restartCount% times. Last restart: %restartTime%
+REM Check if webhook URL is set and send stop message
+if not "%webhookURL%"=="" (
+    curl -H "Content-Type: application/json" -X POST -d "{\"content\":\"%webhookMessageStop%\"}" %webhookURL%
+)
 goto scriptUpdater
 
 :runNoRestart
 title %Title%
+REM Check if webhook URL is set and send start message
+if not "%webhookURL%"=="" (
+    curl -H "Content-Type: application/json" -X POST -d "{\"content\":\"%webhookMessageStart%\"}" %webhookURL%
+)
 java %RAM% %args% -jar %serverName% %GUI%
 echo.
 echo.
+REM Check if webhook URL is set and send stop message
+if not "%webhookURL%"=="" (
+    curl -H "Content-Type: application/json" -X POST -d "{\"content\":\"%webhookMessageStop%\"}" %webhookURL%
+)
 echo Server has closed or crashed.
 CHOICE /N /C YN /M "Do you want to restart the server? (Y/N): "
 if %errorlevel%==1 goto scriptUpdater
@@ -212,6 +229,15 @@ echo [1mEnable server GUI?[0m
 CHOICE /N /T 5 /D N /C:YN /M "GUI (Y/N): "
 if %errorlevel%==1 set GUI=true
 if %errorlevel%==2 set GUI=false
+cls
+echo [1mEnable Discord webhooks?[0m
+echo This will post stop/start notifications.
+CHOICE /N /C YN /M "Proceed with Discord webhook setup? (Y/N)"
+if %errorlevel%==1 (
+    set /p "webhookURL=Enter the Discord webhook URL: "
+) else (
+    set "webhookURL="
+)
 REM Confirm user choices
 cls
 echo [1;32m.............................................[0m
@@ -230,7 +256,7 @@ echo # Configuration File Version > .\config\StartupScript.conf
 echo configVersion=%currentConfigVersion%>> .\config\StartupScript.conf
 echo #  >> .\config\StartupScript.conf
 echo # --------------------------------------------------------------------------------------------------------------------------- >> .\config\StartupScript.conf
-echo #                                         Change the values in the section below >> .\config\StartupScript.conf
+echo #                                         General Server Options >> .\config\StartupScript.conf
 echo # --------------------------------------------------------------------------------------------------------------------------- >> .\config\StartupScript.conf
 echo #  >> .\config\StartupScript.conf
 echo # Define server file name here >> .\config\StartupScript.conf
@@ -251,6 +277,19 @@ echo.  >> .\config\StartupScript.conf
 echo # Set console title here >> .\config\StartupScript.conf
 echo Title=Minecraft Server >> .\config\StartupScript.conf
 echo.  >> .\config\StartupScript.conf
+echo # --------------------------------------------------------------------------------------------------------------------------- >> .\config\StartupScript.conf
+echo #                                         Discord Webhook Options >> .\config\StartupScript.conf
+echo # --------------------------------------------------------------------------------------------------------------------------- >> .\config\StartupScript.conf
+echo # Follow the "Making a Webhook" section here: https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks>> .\config\StartupScript.conf
+echo.  >> .\config\StartupScript.conf
+echo # Set the Discord webhook URL here >> .\config\StartupScript.conf
+echo webhookURL=%webhookURL%>> .\config\StartupScript.conf
+echo.  >> .\config\StartupScript.conf
+echo # Set the message which is sent via webhook when the server stops >> .\config\StartupScript.conf
+echo webhookMessageStop=```\uD83C\uDFC1 The server has stopped.```>> .\config\StartupScript.conf
+echo.  >> .\config\StartupScript.conf
+echo # Set the message which is sent via webhook when the server stops >> .\config\StartupScript.conf
+echo webhookMessageStart=```\uD83D\uDE80 The server has started.```>> .\config\StartupScript.conf
 echo Config variables successfully saved to StartupScript.conf
 
 REM Write Java Args to .\config\jvm_args.txt
