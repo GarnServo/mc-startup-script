@@ -14,7 +14,8 @@
 4️⃣ Auto-generate+accept EULA  
 5️⃣ GUI toggle  
 6️⃣ Customisable console title  
-7️⃣ Auto-updates with latest version from GitHub
+7️⃣ Discord webhook integration  
+8️⃣ Auto-updates with latest version from GitHub
 
 ## Requirements
 - Windows OS
@@ -46,6 +47,7 @@ No need to restart the script.
 - [X] Queries user whether the server should auto-restart or not.
 - [X] Queries user whether server should use pre-configured JVM arguments. Regardless of result, will generate file for flag storage.
 - [X] Queries user whether to launch with GUI.
+- [X] Queries user whether to use Discord webhooks. If yes, user inputs webhook URL.
 - [X] Lets user confirm choices. If confirmed, continue to normal startup. If rejected, will restart initial configuration.
 - [X] Stores configuration in /config/StartupScript.conf, and JVM args in /config/jvm_args.txt.
 - [X] Generates auto-accepted EULA.
@@ -58,14 +60,16 @@ No need to restart the script.
 - [X] Checks for JVM arguments file, if non-existent, will create one with optimised flags. If it exists, loads the args into an environment variable.
 - [X] Checks auto-restart config to decide launch path.
 #### Auto-Restart Enabled
-- [X] Launches server and changes console title to the configurable title + restart count.
-- [X] Upon crash or restart, increments the restart counter and reloads configuration + JVM flags.
+- [X] Launches server, changes console title to the configurable title + restart count, and (if configured) sends Discord message.
+- [X] Upon crash or restart, increments the restart counter, reloads configuration + JVM flags, and (if configured) sends Discord message.
 #### Auto-Restart Disabled
-- [X] Launches server and changes console title to the configurable title.
-- [X] Upon crash or restart, prompts user whether to restart or exit.  
+- [X] Launches server and changes console title to the configurable title, and (if configured) sends Discord message.
+- [X] Upon crash or restart, prompts user whether to restart or exit, and (if configured) sends Discord message.  
 
 ### Planned
 - [ ] Improve text formatting
+- [ ] Update server .jar to latest, within Minecraft version.  
+_e.g. paper 1.20.4 build 460 > paper 1.20.4 > build 461_
 
 ## Disclaimer
 By using this script, you are indicating your agreement to the [Minecraft EULA](https://aka.ms/MinecraftEULA).
