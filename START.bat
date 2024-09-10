@@ -1,6 +1,6 @@
 @echo off
 title Checking dependencies...
-set scriptVersion=v1.3.2
+set scriptVersion=v1.3.3
 set currentConfigVersion=v1.3.0
 set "configFile=.\config\StartupScript.conf"
 
@@ -9,78 +9,66 @@ set "restartCount=0"
 set "restartTime=No restarts yet..."
 
 REM Check if the scripts utility folder exists, if not, create it.
-if not exist "config" (
-    mkdir config
-    echo Created config folder
-)
+mkdir "config" >nul 2>&1
 
-REM Check if script config file exists, if not, go to create it.
-if not exist %configFile% (
+REM Check if the config file exists, if not, go to initial setup
+if not exist "%configFile%" (
+    goto initialSetup
+)
+REM Check configuration version
+for /f "tokens=1,* delims==" %%a in ('findstr /r "^configVersion=" "%configFile%"') do (
+    set "configVersion=%%b"
+    goto versionCheck
+)
+:versionCheck
+REM Compare with expected version
+if "%configVersion%" NEQ "%currentConfigVersion%" (
+    echo [1;31mFollowing an update, your configuration file is outdated.[0m
+    echo [1mPress any key to update your configuration...
+    pause >nul
     goto initialSetup
 ) else (
-    REM Check configuration version
-    set "configVersion="
-    for /f "tokens=1,* delims==" %%a in ('type %configFile%') do (
-        if "%%a"=="configVersion" (
-            set "configVersion=%%b"
-            goto configVersionFound
-        )
-    )
-    :configVersionFound
-    REM Compare with expected version
-    if "%configVersion%" NEQ "%currentConfigVersion%" (
-        echo [1;31mFollowing an update, your configuration file is outdated.[0m
-        echo [1mPress any key to update your configuration...
-        pause >nul
-        goto initialSetup
-    ) else (
-        goto scriptUpdater
-    )
+    goto scriptUpdater
 )
 
 :scriptUpdater
 title Checking for updates...
-
-REM Check for updates to this script.
+REM Check for updates to this script using PowerShell.
 for /f "delims=" %%a in ('powershell -Command "(Invoke-WebRequest -Uri 'https://api.github.com/repos/GarnServo/mc-startup-script/releases/latest').Content | ConvertFrom-Json | Select -ExpandProperty tag_name"') do set latestVersion=%%a
-echo Current script version: %scriptVersion%
-echo Latest version from GitHub: %latestVersion%
-REM Check if the script version is greater than the latest version
+REM Compare script versions and decide if an update is needed
 if %latestVersion% LEQ %scriptVersion% (
     echo You have the latest version of the script.
     goto initiateServer
-) else (
-    echo An update is available for the script ^(version "%latestVersion%"^).
-    choice /C YN /M "Update script (Y/N): "
-    if errorlevel 2 goto initiateServer
-    if errorlevel 1 (
-        echo @echo off > UpdateStartupScript.bat
-        echo title Updating startup script... > UpdateStartupScript.bat
-        echo powershell -Command "(Invoke-WebRequest -Uri 'https://github.com/GarnServo/mc-startup-script/releases/latest/download/START.bat' -OutFile 'START.bat')" >> UpdateStartupScript.bat
-        echo start START.bat >> UpdateStartupScript.bat
-        echo exit >> UpdateStartupScript.bat
-        start UpdateStartupScript.bat
-        exit
-    )
 )
 
+REM An update is available
+echo An update is available for the script, "%latestVersion%". You're currently using "%scriptVersion%".
+choice /C YN /M "Update script? "
+REM If the user chooses not to update, skip to initiating the server
+if errorlevel 2 goto initiateServer
+REM If the user chooses to update
+echo Updating script...
+(
+    echo @echo off
+    echo title Updating startup script...
+    echo powershell -Command "(Invoke-WebRequest -Uri 'https://github.com/GarnServo/mc-startup-script/releases/latest/download/START.bat' -OutFile 'START.bat')"
+    echo start START.bat
+    echo exit
+) > UpdateStartupScript.bat
+start UpdateStartupScript.bat
+exit
 
 
 :initiateServer
 title Initiating server...
 REM Cleanup updater
-if exist UpdateStartupScript.bat del UpdateStartupScript.bat
-
-REM Check EULA exists, if not, go to create it (and accept it)
-if not exist "eula.txt" (
-    goto eula
-)
+del /q UpdateStartupScript.bat >nul 2>&1
+REM Check for EULA
+if not exist "eula.txt" goto eula
 
 REM Reads the startup config file and fetches the variables from the config file and ignores "#" comments
-for /f "tokens=*" %%i in ('type %configFile% ^| findstr /V "^#"') do (
-    for /f "tokens=1,2 delims==" %%a in ("%%i") do (
-        set "%%a=%%b"
-    )
+for /f "usebackq tokens=1,2 delims==" %%a in (`findstr /v "^#" "%configFile%"`) do (
+    set "%%a=%%b"
 )
 
 REM Display config info on startup
@@ -123,8 +111,8 @@ if "%autoRestart%"=="true" (
 
 :runRestart
 title %Title% ^| Restarted: %restartCount% times
-REM Check if webhook URL is set and send start message
-if not "%webhookURL%"=="" (
+REM Send start message if webhook URL is set
+if defined webhookURL (
     curl -H "Content-Type: application/json" -X POST -d "{\"content\":\"%webhookMessageStart%\"}" %webhookURL%
 )
 REM Start the server
@@ -135,35 +123,37 @@ set /A restartCount+=1
 set "restartTime=%TIME%, %DATE%"
 echo Server has closed or crashed...restarting now...
 echo Server has restarted %restartCount% times. Last restart: %restartTime%
-REM Check if webhook URL is set and send stop message
-if not "%webhookURL%"=="" (
+REM Send stop message if webhook URL is set
+if defined webhookURL (
     curl -H "Content-Type: application/json" -X POST -d "{\"content\":\"%webhookMessageStop%\"}" %webhookURL%
 )
 goto scriptUpdater
 
 :runNoRestart
 title %Title%
-REM Check if webhook URL is set and send start message
-if not "%webhookURL%"=="" (
+REM Send start message if webhook URL is set
+if defined webhookURL (
     curl -H "Content-Type: application/json" -X POST -d "{\"content\":\"%webhookMessageStart%\"}" %webhookURL%
 )
+REM Start the server
 java %RAM% %args% -jar %serverName% %GUI%
 echo.
 echo.
-REM Check if webhook URL is set and send stop message
-if not "%webhookURL%"=="" (
+REM Send stop message if webhook URL is set
+if defined webhookURL (
     curl -H "Content-Type: application/json" -X POST -d "{\"content\":\"%webhookMessageStop%\"}" %webhookURL%
 )
 echo Server has closed or crashed.
+REM Prompt for restart decision
 CHOICE /N /C YN /M "Do you want to restart the server? (Y/N): "
-if %errorlevel%==1 goto scriptUpdater
-if %errorlevel%==2 (
+if errorlevel 2 (
     echo You chose not to restart the server.
     echo Press any key to exit.
     pause >nul
     exit /b
 )
-
+REM Proceed to scriptUpdater if restart is chosen
+goto scriptUpdater
 
 
 
@@ -171,10 +161,11 @@ if %errorlevel%==2 (
 title Running through initial config...
 :serverName
 cls
-REM Let user define the title of their server jar file
-echo [1mEnter the filename of your server .jar file [0m(Eg: purpur-1.20.4-2155.jar)
+REM Prompt user for server .jar file
+echo [1mEnter the filename of your server .jar file [0m (e.g., purpur-1.20.4-2155.jar)
 set /p "serverName=Server .jar name: "
-if "%serverName:~-4%" neq ".jar" (
+REM Validate file extension
+if /i "%serverName:~-4%" neq ".jar" (
     echo Error: File must end with .jar extension.
     goto :serverName
 )
@@ -188,54 +179,53 @@ if not exist "%serverName%" (
 goto :maxRam
 :maxRam
 cls
-REM Let user configure maximum RAM for the server.
-echo [1mEnter Maximum Ram Allocation for Minecraft Server. [0m^(Eg:1G,1024M^)
-echo ^(Must have M or G for Megabytes and Gigabytes respectively^)
-set /p maxRam=Maximum RAM: 
-if "%maxRam%" == "" set maxRam=1G
-if defined maxRam (
-    if not "%maxRam:~-1%"=="M" if not "%maxRam:~-1%"=="G" (
-        echo Invalid input, input should be one or more numbers followed by "M" or "G".
-        echo Press any key to retry...
-        pause >nul
-        goto maxRam
-    )
+REM Prompt user for maximum RAM allocation
+echo [1mEnter Maximum RAM Allocation for Minecraft Server:[0m (e.g., 1G, 1024M)
+echo ^(Must end with "M" for Megabytes or "G" for Gigabytes^)
+set /p "maxRam=Maximum RAM: "
+if "%maxRam%"=="" set "maxRam=1G"
+REM Validate RAM input
+if not "%maxRam:~-1%"=="M" if not "%maxRam:~-1%"=="G" (
+    echo Invalid input. Input should be one or more numbers followed by "M" or "G".
+    echo Press any key to retry...
+    pause >nul
+    goto :maxRam
 )
-goto iniRam
+goto :iniRam
 :iniRam
 cls
-REM Let user configure maximum initial RAM for the server. Should be same as max RAM, unless on low-RAM system.
-echo [1mEnter Initial RAM Allocation for Minecraft Server. [0m^(Eg:1G,1024M^)
-echo ^(Must have M or G for Megabytes and Gigabytes respectively.^)
-set /p iniRam=Initial RAM: 
-if "%iniRam%" == "" set iniRam=1G
-if defined iniRam (
-    if not "%iniRam:~-1%"=="M" if not "%iniRam:~-1%"=="G" (
-        echo Invalid input, input should be one or more numbers followed by "M" or "G".
-        echo Press any key to retry...
-        pause >nul
-        goto iniRam
-    )
+REM Prompt user for initial RAM allocation
+echo [1mEnter Initial RAM Allocation for Minecraft Server:[0m (e.g., 1G, 1024M)
+echo ^(Must end with "M" for Megabytes or "G" for Gigabytes^)
+set /p "iniRam=Initial RAM: "
+if "%iniRam%"=="" set "iniRam=1G"
+REM Validate RAM input
+if not "%iniRam:~-1%"=="M" if not "%iniRam:~-1%"=="G" (
+    echo Invalid input. Input should be one or more numbers followed by "M" or "G".
+    echo Press any key to retry...
+    pause >nul
+    goto :iniRam
 )
 cls
-REM Let user configure whether the server auto-restarts
+REM Let user configure auto-restart
 echo [1mAuto-restart the Minecraft Server on crash or ^/restart[0m
-CHOICE /N /C:YN /M "Auto-restart (Y/N): "
-if %errorlevel%==1 set autoRestart=true
-if %errorlevel%==2 set autoRestart=false
+CHOICE /N /C YN /M "Auto-restart (Y/N): "
+set "autoRestart=false"
+if %errorlevel%==1 set "autoRestart=true"
 cls
-REM Let user configure whether to use customised JVM arguments
+REM Let user configure JVM arguments
 echo [1mUse optimised JVM args?[0m
-CHOICE /N /C:YN /M "Optimised JVM args (Y/N): "
-if %errorlevel%==1 set optArgs=true
-if %errorlevel%==2 set optArgs=false
+CHOICE /N /C YN /M "Optimised JVM args (Y/N): "
+set "optArgs=false"
+if %errorlevel%==1 set "optArgs=true"
 cls
-REM Let user configure whether to use default server GUI
+REM Let user configure server GUI
 echo [1mEnable server GUI?[0m
-CHOICE /N /T 5 /D N /C:YN /M "GUI (Y/N): "
-if %errorlevel%==1 set GUI=true
-if %errorlevel%==2 set GUI=false
+CHOICE /N /T 5 /D N /C YN /M "GUI (Y/N): "
+set "GUI=false"
+if %errorlevel%==1 set "GUI=true"
 cls
+REM Let user configure Discord webhooks
 echo [1mEnable Discord webhooks?[0m
 echo This will post stop/start notifications.
 CHOICE /N /C YN /M "Proceed with Discord webhook setup? (Y/N)"
@@ -262,46 +252,61 @@ if %errorlevel%==1 goto saveSetup
 if %errorlevel%==2 goto initialSetup
 
 :saveSetup
+setlocal enabledelayedexpansion
 title Saving setup...
-echo # Configuration File Version > %configFile%
-echo configVersion=%currentConfigVersion%>> %configFile%
-echo #  >> %configFile%
-echo # --------------------------------------------------------------------------------------------------------------------------- >> %configFile%
-echo #                                         General Server Options >> %configFile%
-echo # --------------------------------------------------------------------------------------------------------------------------- >> %configFile%
-echo #  >> %configFile%
-echo # Define server file name here >> %configFile%
-echo serverName=%serverName%>> %configFile%
-echo. >> %configFile%
-echo # Define RAM allocation amount here you can use G for Gigabytes or M for Megabytes >> %configFile%
-echo # Maximum memory allocation pool >> %configFile%
-echo maxRam=%maxRam%>> %configFile%
-echo # Initial memory allocation pool >> %configFile%
-echo iniRam=%iniRam%>> %configFile%
-echo.  >> %configFile%
-echo # Restart mode on crash or /restart ^(true/false^) default = true >> %configFile%
-echo autoRestart=%autoRestart%>> %configFile%
-echo.  >> %configFile%
-echo # Vanilla server GUI ^(true/false^) >> %configFile%
-echo GUI=%GUI%>> %configFile%
-echo.  >> %configFile%
-echo # Set console title here >> %configFile%
-echo Title=Minecraft Server >> %configFile%
-echo.  >> %configFile%
-echo # --------------------------------------------------------------------------------------------------------------------------- >> %configFile%
-echo #                                         Discord Webhook Options >> %configFile%
-echo # --------------------------------------------------------------------------------------------------------------------------- >> %configFile%
-echo # Follow the "Making a Webhook" section here: https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks>> %configFile%
-echo.  >> %configFile%
-echo # Set the Discord webhook URL here >> %configFile%
-echo webhookURL=%webhookURL%>> %configFile%
-echo.  >> %configFile%
-echo # Set the message which is sent via webhook when the server stops >> %configFile%
-echo webhookMessageStop=```\uD83C\uDFC1 The server has stopped.```>> %configFile%
-echo.  >> %configFile%
-echo # Set the message which is sent via webhook when the server stops >> %configFile%
-echo webhookMessageStart=```\uD83D\uDE80 The server has started.```>> %configFile%
-echo Config variables successfully saved to StartupScript.conf
+REM Use a temporary file to gather all configuration lines
+set "tempFile=%TEMP%\configTemp.txt"
+(
+    echo # Configuration File Version
+    echo configVersion=%currentConfigVersion%
+    echo #
+    echo # ---------------------------------------------------------------------------------------------------------------------------
+    echo #                                         General Server Options
+    echo # ---------------------------------------------------------------------------------------------------------------------------
+    echo #
+    echo # Define server file name here
+    echo serverName=%serverName%
+    echo #
+    echo # Define RAM allocation amount here you can use G for Gigabytes or M for Megabytes
+    echo # Maximum memory allocation pool
+    echo maxRam=%maxRam%
+    echo # Initial memory allocation pool
+    echo iniRam=%iniRam%
+    echo #
+    echo # Restart mode on crash or /restart ^(true/false^) default = true
+    echo autoRestart=%autoRestart%
+    echo #
+    echo # Vanilla server GUI ^(true/false^)
+    echo GUI=%GUI%
+    echo #
+    echo # Set console title here
+    echo Title=Minecraft Server
+    echo #
+    echo # ---------------------------------------------------------------------------------------------------------------------------
+    echo #                                         Discord Webhook Options
+    echo # ---------------------------------------------------------------------------------------------------------------------------
+    echo #
+    echo # Follow the "Making a Webhook" section here: https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks
+    echo #
+    echo # Set the Discord webhook URL here
+    echo webhookURL=%webhookURL%
+    echo #
+    echo # Set the message which is sent via webhook when the server stops
+    echo webhookMessageStop=```\uD83C\uDFC1 The server has stopped.```
+    echo #
+    echo # Set the message which is sent via webhook when the server starts
+    echo webhookMessageStart=```\uD83D\uDE80 The server has started.```
+) > "%tempFile%"
+REM Move the temporary file to the final configuration file
+move /Y "%tempFile%" "%configFile%"
+REM If successful, delete temp file
+if %ERRORLEVEL% == 0 (
+    echo Config variables successfully saved to %configFile%
+    del "%tempFile%" 2>nul
+) else (
+    echo Failed to save configuration.
+)
+endlocal
 
 REM Write Java Args to .\config\jvm_args.txt
 if %optArgs%==true (
@@ -314,11 +319,11 @@ goto eula
 
 :eula
 REM Set EULA to true
-cd %localhost%
-if exist eula.txt (del eula.txt)
-echo #By changing the setting below to TRUE you are indicating your agreement to our EULA ^(https://aka.ms/MinecraftEULA^)^.>> eula.txt
-echo #Auto-accepted EULA with startup script made by Garn Servo. >> eula.txt
-echo eula=true>> eula.txt
-echo [32mEULA created and accepted.[0m
+cd /d %localhost% 2>nul
+(
+    echo #By changing the setting below to TRUE you are indicating your agreement to our EULA ^(https://aka.ms/MinecraftEULA^)^.
+    echo #Auto-accepted EULA with startup script made by Garn Servo.
+    echo eula=true
+) > eula.txt
 cls
 goto scriptUpdater
