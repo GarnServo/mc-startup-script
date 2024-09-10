@@ -2,6 +2,7 @@
 title Checking dependencies...
 set scriptVersion=v1.3.1
 set currentConfigVersion=v1.3.0
+set "configFile=.\config\StartupScript.conf"
 
 REM Set restart counter variables
 set "restartCount=0"
@@ -14,12 +15,12 @@ if not exist "config" (
 )
 
 REM Check if script config file exists, if not, go to create it.
-if not exist .\config\StartupScript.conf (
+if not exist %configFile% (
     goto initialSetup
 ) else (
     REM Check configuration version
     set "configVersion="
-    for /f "tokens=1,* delims==" %%a in ('type .\config\StartupScript.conf') do (
+    for /f "tokens=1,* delims==" %%a in ('type %configFile%') do (
         if "%%a"=="configVersion" (
             set "configVersion=%%b"
             goto configVersionFound
@@ -76,7 +77,7 @@ if not exist "eula.txt" (
 )
 
 REM Reads the startup config file and fetches the variables from the config file and ignores "#" comments
-for /f "tokens=*" %%i in ('type .\config\StartupScript.conf ^| findstr /V "^#"') do (
+for /f "tokens=*" %%i in ('type %configFile% ^| findstr /V "^#"') do (
     for /f "tokens=1,2 delims==" %%a in ("%%i") do (
         set "%%a=%%b"
     )
@@ -262,44 +263,44 @@ if %errorlevel%==2 goto initialSetup
 
 :saveSetup
 title Saving setup...
-echo # Configuration File Version > .\config\StartupScript.conf
-echo configVersion=%currentConfigVersion%>> .\config\StartupScript.conf
-echo #  >> .\config\StartupScript.conf
-echo # --------------------------------------------------------------------------------------------------------------------------- >> .\config\StartupScript.conf
-echo #                                         General Server Options >> .\config\StartupScript.conf
-echo # --------------------------------------------------------------------------------------------------------------------------- >> .\config\StartupScript.conf
-echo #  >> .\config\StartupScript.conf
-echo # Define server file name here >> .\config\StartupScript.conf
-echo serverName=%serverName%>> .\config\StartupScript.conf
-echo. >> .\config\StartupScript.conf
-echo # Define RAM allocation amount here you can use G for Gigabytes or M for Megabytes >> .\config\StartupScript.conf
-echo # Maximum memory allocation pool >> .\config\StartupScript.conf
-echo maxRam=%maxRam%>> .\config\StartupScript.conf
-echo # Initial memory allocation pool >> .\config\StartupScript.conf
-echo iniRam=%iniRam%>> .\config\StartupScript.conf
-echo.  >> .\config\StartupScript.conf
-echo # Restart mode on crash or /restart ^(true/false^) default = true >> .\config\StartupScript.conf
-echo autoRestart=%autoRestart%>> .\config\StartupScript.conf
-echo.  >> .\config\StartupScript.conf
-echo # Vanilla server GUI ^(true/false^) >> .\config\StartupScript.conf
-echo GUI=%GUI%>> .\config\StartupScript.conf
-echo.  >> .\config\StartupScript.conf
-echo # Set console title here >> .\config\StartupScript.conf
-echo Title=Minecraft Server >> .\config\StartupScript.conf
-echo.  >> .\config\StartupScript.conf
-echo # --------------------------------------------------------------------------------------------------------------------------- >> .\config\StartupScript.conf
-echo #                                         Discord Webhook Options >> .\config\StartupScript.conf
-echo # --------------------------------------------------------------------------------------------------------------------------- >> .\config\StartupScript.conf
-echo # Follow the "Making a Webhook" section here: https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks>> .\config\StartupScript.conf
-echo.  >> .\config\StartupScript.conf
-echo # Set the Discord webhook URL here >> .\config\StartupScript.conf
-echo webhookURL=%webhookURL%>> .\config\StartupScript.conf
-echo.  >> .\config\StartupScript.conf
-echo # Set the message which is sent via webhook when the server stops >> .\config\StartupScript.conf
-echo webhookMessageStop=```\uD83C\uDFC1 The server has stopped.```>> .\config\StartupScript.conf
-echo.  >> .\config\StartupScript.conf
-echo # Set the message which is sent via webhook when the server stops >> .\config\StartupScript.conf
-echo webhookMessageStart=```\uD83D\uDE80 The server has started.```>> .\config\StartupScript.conf
+echo # Configuration File Version > %configFile%
+echo configVersion=%currentConfigVersion%>> %configFile%
+echo #  >> %configFile%
+echo # --------------------------------------------------------------------------------------------------------------------------- >> %configFile%
+echo #                                         General Server Options >> %configFile%
+echo # --------------------------------------------------------------------------------------------------------------------------- >> %configFile%
+echo #  >> %configFile%
+echo # Define server file name here >> %configFile%
+echo serverName=%serverName%>> %configFile%
+echo. >> %configFile%
+echo # Define RAM allocation amount here you can use G for Gigabytes or M for Megabytes >> %configFile%
+echo # Maximum memory allocation pool >> %configFile%
+echo maxRam=%maxRam%>> %configFile%
+echo # Initial memory allocation pool >> %configFile%
+echo iniRam=%iniRam%>> %configFile%
+echo.  >> %configFile%
+echo # Restart mode on crash or /restart ^(true/false^) default = true >> %configFile%
+echo autoRestart=%autoRestart%>> %configFile%
+echo.  >> %configFile%
+echo # Vanilla server GUI ^(true/false^) >> %configFile%
+echo GUI=%GUI%>> %configFile%
+echo.  >> %configFile%
+echo # Set console title here >> %configFile%
+echo Title=Minecraft Server >> %configFile%
+echo.  >> %configFile%
+echo # --------------------------------------------------------------------------------------------------------------------------- >> %configFile%
+echo #                                         Discord Webhook Options >> %configFile%
+echo # --------------------------------------------------------------------------------------------------------------------------- >> %configFile%
+echo # Follow the "Making a Webhook" section here: https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks>> %configFile%
+echo.  >> %configFile%
+echo # Set the Discord webhook URL here >> %configFile%
+echo webhookURL=%webhookURL%>> %configFile%
+echo.  >> %configFile%
+echo # Set the message which is sent via webhook when the server stops >> %configFile%
+echo webhookMessageStop=```\uD83C\uDFC1 The server has stopped.```>> %configFile%
+echo.  >> %configFile%
+echo # Set the message which is sent via webhook when the server stops >> %configFile%
+echo webhookMessageStart=```\uD83D\uDE80 The server has started.```>> %configFile%
 echo Config variables successfully saved to StartupScript.conf
 
 REM Write Java Args to .\config\jvm_args.txt
