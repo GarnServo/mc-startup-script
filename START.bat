@@ -1,6 +1,6 @@
 @echo off
 title Checking dependencies...
-set scriptVersion=v1.3.1
+set scriptVersion=v1.3.2
 set currentConfigVersion=v1.3.0
 set "configFile=.\config\StartupScript.conf"
 
