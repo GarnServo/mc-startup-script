@@ -72,12 +72,12 @@ exit
 
 :initiateServer
 title Initiating server...
-REM Cleanup updater
-del /q UpdateStartupScript.bat >nul 2>&1
-REM Check for EULA
+REM Cleanup updater script silently
+if exist "UpdateStartupScript.bat" del /q UpdateStartupScript.bat >nul 2>&1
+REM Check for EULA and handle it if missing
 if not exist "eula.txt" goto eula
 
-REM Reads the startup config file and fetches the variables from the config file and ignores "#" comments
+REM Load configuration
 for /f "usebackq tokens=1,2 delims==" %%a in (`findstr /v "^#" "%configFile%"`) do (
     set "%%a=%%b"
 )
@@ -88,36 +88,36 @@ echo [1;4;33mServer[0m: [33m%serverName%[0m
 echo [1;4;33mInitial RAM[0m: [33m%iniRam% [0;1m^| [1;4;33mMaximum RAM[0m: [33m%maxRam%[0m
 echo [1;4;33mAuto-restart[0m: [33m%autoRestart%[0m
 echo [1;4;33mServer GUI[0m: [33m%GUI%[0m
-if not "%webhookURL%"=="" (
-    echo [1;4;33mDiscord Webhook[0m: [33mconfigured[0m
-) else (
+if not defined webhookURL (
     echo [1;4;33mDiscord Webhook[0m: [33mnot configured[0m
+) else (
+    echo [1;4;33mDiscord Webhook[0m: [33mconfigured[0m
 )
 echo [1;32m.............................................[0m
 echo Server initialising...
 
-REM Set RAM values
-set RAM=-Xmx%maxRam% -Xms%iniRam%
-REM Set GUI value
-if "%GUI%"=="true" set GUI=
-if "%GUI%"=="false" set GUI=--nogui
-REM Check for JVM args file
-if exist ".\config\jvm_args.txt" (
-    echo [32mJVM args file found.[0m
-    set args=@.\config\jvm_args.txt
-) else (
+REM Set memory values
+set "RAM=-Xmx%maxRam% -Xms%iniRam%"
+REM Set GUI flag based on configuration
+set "GUI=%GUI%"
+if "%GUI%"=="false" set "GUI=--nogui"
+REM Check for existing JVM args file or create it if missing
+set "jvmArgsFile=.\config\jvm_args.txt"
+if not exist "%jvmArgsFile%" (
     echo [31mJVM args file not found![0m
     (
-        echo -XX:+UnlockExperimentalVMOptions -XX:+UnlockDiagnosticVMOptions -XX:+AlwaysActAsServerClassMachine -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NmethodSweepActivity=1 -XX:ReservedCodeCacheSize=400M -XX:NonNMethodCodeHeapSize=12M -XX:ProfiledCodeHeapSize=194M -XX:NonProfiledCodeHeapSize=194M -XX:-DontCompileHugeMethods -XX:MaxNodeLimit=240000 -XX:NodeLimitFudgeFactor=8000 -XX:+UseVectorCmov -XX:+PerfDisableSharedMem -XX:+UseFastUnorderedTimeStamps -XX:+UseCriticalJavaThreadPriority -XX:ThreadPriorityPolicy=1 -XX:AllocatePrefetchStyle=3 -XX:+UseG1GC -XX:MaxGCPauseMillis=130 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:G1NewSizePercent=28 -XX:G1HeapRegionSize=16M -XX:G1ReservePercent=20 -XX:G1MixedGCCountTarget=3 -XX:InitiatingHeapOccupancyPercent=10 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1RSetUpdatingPauseTimePercent=0 -XX:SurvivorRatio=32 -XX:MaxTenuringThreshold=1 -XX:G1SATBBufferEnqueueingThresholdPercent=30 -XX:G1ConcMarkStepDurationMillis=5 -XX:G1ConcRefinementServiceIntervalMillis=150 -XX:G1ConcRSHotCardLimit=16> .\config\jvm_args.txt
-        set args=@.\config\jvm_args.txt
+        echo -XX:+UnlockExperimentalVMOptions -XX:+UnlockDiagnosticVMOptions -XX:+AlwaysActAsServerClassMachine -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NmethodSweepActivity=1 -XX:ReservedCodeCacheSize=400M -XX:NonNMethodCodeHeapSize=12M -XX:ProfiledCodeHeapSize=194M -XX:NonProfiledCodeHeapSize=194M -XX:-DontCompileHugeMethods -XX:MaxNodeLimit=240000 -XX:NodeLimitFudgeFactor=8000 -XX:+UseVectorCmov -XX:+PerfDisableSharedMem -XX:+UseFastUnorderedTimeStamps -XX:+UseCriticalJavaThreadPriority -XX:ThreadPriorityPolicy=1 -XX:AllocatePrefetchStyle=3 -XX:+UseG1GC -XX:MaxGCPauseMillis=130 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:G1NewSizePercent=28 -XX:G1HeapRegionSize=16M -XX:G1ReservePercent=20 -XX:G1MixedGCCountTarget=3 -XX:InitiatingHeapOccupancyPercent=10 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1RSetUpdatingPauseTimePercent=0 -XX:SurvivorRatio=32 -XX:MaxTenuringThreshold=1 -XX:G1SATBBufferEnqueueingThresholdPercent=30 -XX:G1ConcMarkStepDurationMillis=5 -XX:G1ConcRefinementServiceIntervalMillis=150 -XX:G1ConcRSHotCardLimit=16> "%jvmArgsFile%"
     )
     echo [32mJVM args file created successfully.[0m
+) else (
+    echo [32mJVM args file found.[0m
 )
-REM Check auto-restart value
+set "args=@%jvmArgsFile%"
+REM Check if auto-restart is enabled and jump to the appropriate label
 if "%autoRestart%"=="true" (
-    GOTO runRestart
-) ELSE (
-    GOTO runNoRestart
+    goto runRestart
+) else (
+    goto runNoRestart
 )
 
 :runRestart
@@ -251,10 +251,10 @@ echo [1;4;33mServer[0m: [33m%serverName%[0m
 echo [1;4;33mInitial RAM[0m: [33m%iniRam% [0;1m^| [1;4;33mMaximum RAM[0m: [33m%maxRam%[0m
 echo [1;4;33mAuto-restart[0m: [33m%autoRestart%[0m
 echo [1;4;33mServer GUI[0m: [33m%GUI%[0m
-if not "%webhookURL%"=="" (
-    echo [1;4;33mDiscord Webhook[0m: [33mconfigured[0m
-) else (
+if not defined webhookURL (
     echo [1;4;33mDiscord Webhook[0m: [33mnot configured[0m
+) else (
+    echo [1;4;33mDiscord Webhook[0m: [33mconfigured[0m
 )
 echo [1;32m.............................................[0m
 CHOICE /N /C:YN /M "These are your desired settings? (Y/N): "
