@@ -16,9 +16,11 @@ if not exist "%configFile%" (
     goto initialSetup
 )
 REM Check configuration version
-for /f "tokens=1,* delims==" %%a in ('findstr /r "^configVersion=" "%configFile%"') do (
-    set "configVersion=%%b"
-    goto versionCheck
+for /f "tokens=1,* delims==" %%a in ('more +1 "%configFile%"') do (
+    if "%%a"=="configVersion" (
+        set "configVersion=%%b"
+        goto versionCheck
+    )
 )
 :versionCheck
 REM Compare with expected version
