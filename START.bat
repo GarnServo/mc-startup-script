@@ -256,8 +256,6 @@ if %errorlevel%==2 goto initialSetup
 :saveSetup
 setlocal enabledelayedexpansion
 title Saving setup...
-REM Use a temporary file to gather all configuration lines
-set "tempFile=%TEMP%\configTemp.txt"
 (
     echo # Configuration File Version
     echo configVersion=%currentConfigVersion%
@@ -298,13 +296,10 @@ set "tempFile=%TEMP%\configTemp.txt"
     echo #
     echo # Set the message which is sent via webhook when the server starts
     echo webhookMessageStart=```\uD83D\uDE80 The server has started.```
-) > "%tempFile%"
-REM Move the temporary file to the final configuration file
-move /Y "%tempFile%" "%configFile%"
-REM If successful, delete temp file
+) > "%configFile%"
+REM Check for success and print appropriate message
 if %ERRORLEVEL% == 0 (
     echo Config variables successfully saved to %configFile%
-    del "%tempFile%" 2>nul
 ) else (
     echo Failed to save configuration.
 )
