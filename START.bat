@@ -203,6 +203,22 @@ if not "%maxRam:~-1%"=="M" if not "%maxRam:~-1%"=="G" (
     pause >nul
     goto :maxRam
 )
+REM Convert RAM input to MB
+set "ramAmount=%maxRam:~0,-1%"
+if /I "%maxRam:~-1%"=="G" (
+    set /a "ramAmount=ramAmount*1024"
+)
+REM Get total system RAM in MB using PowerShell
+for /f "tokens=*" %%a in ('powershell -Command "(Get-WmiObject -Class Win32_ComputerSystem).TotalPhysicalMemory / 1MB"') do set "totalSystemRAM=%%a"
+REM Calculate 80% of system RAM
+set /a "maxAllowedRAM=totalSystemRAM*80/100"
+REM Check if specified RAM exceeds 80% of system RAM
+if %ramAmount% GTR %maxAllowedRAM% (
+    echo The specified RAM exceeds 80% of the system's total RAM.
+    echo Press any key to retry...
+    pause >nul
+    goto :maxRam
+)
 goto :iniRam
 :iniRam
 cls
