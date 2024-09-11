@@ -45,15 +45,14 @@ if not defined latestVersion (
     echo Failed to fetch the latest version. Proceeding with current script.
     goto initiateServer
 )
-echo Current script version: %scriptVersion%
-echo Latest version: %latestVersion%
 REM Compare script versions and check if update is needed
 if "%latestVersion%" LEQ "%scriptVersion%" (
     echo You have the latest version of the script.
     goto initiateServer
 )
 REM Prompt the user for an update if needed
-echo An update to version "%latestVersion%" is available.
+echo An update to "%latestVersion%" is available.
+echo Currently using %scriptVersion%.
 choice /C YN /M "Update the script to version %latestVersion%? (Y/N): "
 if %errorlevel%==2 goto initiateServer
 REM If the user chooses to update, perform the update in a daughter script
@@ -163,7 +162,6 @@ if errorlevel 2 (
     pause >nul
     exit /b
 )
-REM Proceed to scriptUpdater if restart is chosen
 goto scriptUpdater
 
 
