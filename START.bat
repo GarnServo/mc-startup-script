@@ -189,9 +189,13 @@ goto :maxRam
 cls
 REM Prompt user for maximum RAM allocation
 echo [1mEnter Maximum RAM Allocation for Minecraft Server:[0m (e.g., 1G, 1024M)
-echo ^(Must end with "M" for Megabytes or "G" for Gigabytes^)
 set /p "maxRam=Maximum RAM: "
+REM Default to 1G if input is empty
 if "%maxRam%"=="" set "maxRam=1G"
+REM Convert lowercase 'g' or 'm' to uppercase
+for %%i in (G M) do (
+    if /I "%maxRam:~-1%"=="%%i" set "maxRam=%maxRam:~0,-1%%%i"
+)
 REM Validate RAM input
 if not "%maxRam:~-1%"=="M" if not "%maxRam:~-1%"=="G" (
     echo Invalid input. Input should be one or more numbers followed by "M" or "G".
@@ -204,9 +208,13 @@ goto :iniRam
 cls
 REM Prompt user for initial RAM allocation
 echo [1mEnter Initial RAM Allocation for Minecraft Server:[0m (e.g., 1G, 1024M)
-echo ^(Must end with "M" for Megabytes or "G" for Gigabytes^)
 set /p "iniRam=Initial RAM: "
+REM Default to 1G if input is empty
 if "%iniRam%"=="" set "iniRam=1G"
+REM Convert lowercase 'g' or 'm' to uppercase
+for %%i in (G M) do (
+    if /I "%iniRam:~-1%"=="%%i" set "iniRam=%iniRam:~0,-1%%%i"
+)
 REM Validate RAM input
 if not "%iniRam:~-1%"=="M" if not "%iniRam:~-1%"=="G" (
     echo Invalid input. Input should be one or more numbers followed by "M" or "G".
