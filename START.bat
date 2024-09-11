@@ -35,29 +35,38 @@ if "%configVersion%" NEQ "%currentConfigVersion%" (
 
 :scriptUpdater
 title Checking for updates...
-REM Check for updates to this script using PowerShell.
-for /f "delims=" %%a in ('powershell -Command "(Invoke-WebRequest -Uri 'https://api.github.com/repos/GarnServo/mc-startup-script/releases/latest').Content | ConvertFrom-Json | Select -ExpandProperty tag_name"') do set latestVersion=%%a
-REM Compare script versions and decide if an update is needed
-if %latestVersion% LEQ %scriptVersion% (
+REM Fetch the latest version using PowerShell and GitHub API
+for /f "usebackq tokens=*" %%a in (`powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "(Invoke-RestMethod 'https://api.github.com/repos/GarnServo/mc-startup-script/releases/latest').tag_name"`) do (
+    set "latestVersion=%%a"
+)
+REM Validate if the latest version was fetched
+if not defined latestVersion (
+    echo Failed to fetch the latest version. Proceeding with current script.
+    goto initiateServer
+)
+echo Current script version: %scriptVersion%
+echo Latest version: %latestVersion%
+REM Compare script versions and check if update is needed
+if "%latestVersion%" LEQ "%scriptVersion%" (
     echo You have the latest version of the script.
     goto initiateServer
 )
-
-REM An update is available
-echo An update is available for the script, "%latestVersion%". You're currently using "%scriptVersion%".
-choice /C YN /M "Update script? "
-REM If the user chooses not to update, skip to initiating the server
-if errorlevel 2 goto initiateServer
-REM If the user chooses to update
-echo Updating script...
+REM Prompt the user for an update if needed
+echo An update to version "%latestVersion%" is available.
+choice /C YN /M "Update the script to version %latestVersion%? (Y/N): "
+if %errorlevel%==2 goto initiateServer
+REM If the user chooses to update, perform the update in a daughter script
+echo Updating to version %latestVersion%...
 (
     echo @echo off
     echo title Updating startup script...
-    echo powershell -Command "(Invoke-WebRequest -Uri 'https://github.com/GarnServo/mc-startup-script/releases/latest/download/START.bat' -OutFile 'START.bat')"
+    echo powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "(Invoke-WebRequest -Uri 'https://github.com/GarnServo/mc-startup-script/releases/latest/download/START.bat' -OutFile 'START.bat')"
     echo start START.bat
     echo exit
 ) > UpdateStartupScript.bat
-start UpdateStartupScript.bat
+start /b UpdateStartupScript.bat
 exit
 
 
