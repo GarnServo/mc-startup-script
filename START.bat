@@ -238,6 +238,13 @@ if not "%iniRam:~-1%"=="M" if not "%iniRam:~-1%"=="G" (
     pause >nul
     goto :iniRam
 )
+REM Check if iniRam exceeds maxRam
+if %iniRam% GTR %maxRam% (
+    echo Initial RAM allocation exceeds the maximum RAM allocation.
+    echo Press any key to retry...
+    pause >nul
+    goto :iniRam
+)
 cls
 REM Let user configure auto-restart
 echo [1mAuto-restart the Minecraft Server on crash or ^/restart[0m
