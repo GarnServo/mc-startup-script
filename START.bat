@@ -192,20 +192,21 @@ echo [1mEnter Maximum RAM Allocation for Minecraft Server:[0m (e.g., 1G, 1024M
 set /p "maxRam=Maximum RAM: "
 REM Default to 1G if input is empty
 if "%maxRam%"=="" set "maxRam=1G"
-REM Convert lowercase 'g' or 'm' to uppercase
-for %%i in (G M) do (
-    if /I "%maxRam:~-1%"=="%%i" set "maxRam=%maxRam:~0,-1%%%i"
-)
+REM Convert lowercase 'm' or 'g' to uppercase by checking the last character
+set "lastChar=%maxRam:~-1%"
+if /I "%lastChar%"=="m" set "lastChar=M"
+if /I "%lastChar%"=="g" set "lastChar=G"
+set "maxRam=%maxRam:~0,-1%%lastChar%"
 REM Validate RAM input
-if not "%maxRam:~-1%"=="M" if not "%maxRam:~-1%"=="G" (
+if not "%lastChar%"=="M" if not "%lastChar%"=="G" (
     echo Invalid input. Input should be one or more numbers followed by "M" or "G".
     echo Press any key to retry...
     pause >nul
     goto :maxRam
 )
 REM Convert RAM input to MB
-set "ramAmount=%maxRam:~0,-1%"
-if /I "%maxRam:~-1%"=="G" (
+set /a "ramAmount=%maxRam:~0,-1%"
+if /I "%lastChar%"=="G" (
     set /a "ramAmount=ramAmount*1024"
 )
 REM Get total system RAM in MB using PowerShell
@@ -214,7 +215,7 @@ REM Calculate 80% of system RAM
 set /a "maxAllowedRAM=totalSystemRAM*80/100"
 REM Check if specified RAM exceeds 80% of system RAM
 if %ramAmount% GTR %maxAllowedRAM% (
-    echo The specified RAM exceeds 80% of the system's total RAM.
+    echo The specified RAM exceeds 80%% of the system's total RAM.
     echo Press any key to retry...
     pause >nul
     goto :maxRam
@@ -227,19 +228,18 @@ echo [1mEnter Initial RAM Allocation for Minecraft Server:[0m (e.g., 1G, 1024M
 set /p "iniRam=Initial RAM: "
 REM Default to 1G if input is empty
 if "%iniRam%"=="" set "iniRam=1G"
-REM Convert lowercase 'g' or 'm' to uppercase
-for %%i in (G M) do (
-    if /I "%iniRam:~-1%"=="%%i" set "iniRam=%iniRam:~0,-1%%%i"
-)
-REM Validate RAM input
-if not "%iniRam:~-1%"=="M" if not "%iniRam:~-1%"=="G" (
-    echo Invalid input. Input should be one or more numbers followed by "M" or "G".
-    echo Press any key to retry...
-    pause >nul
-    goto :iniRam
+REM Convert lowercase 'm' or 'g' to uppercase by checking the last character
+set "lastChar=%iniRam:~-1%"
+if /I "%lastChar%"=="m" set "lastChar=M"
+if /I "%lastChar%"=="g" set "lastChar=G"
+set "iniRam=%iniRam:~0,-1%%lastChar%"
+REM Convert iniRam to MB for next check
+set /a "iniRAMAmount=%iniRam:~0,-1%"
+if /I "%lastChar%"=="G" (
+    set /a "iniRAMAmount=iniRAMAmount*1024"
 )
 REM Check if iniRam exceeds maxRam
-if %iniRam% GTR %maxRam% (
+if %iniRAMAmount% GTR %ramAmount% (
     echo Initial RAM allocation exceeds the maximum RAM allocation.
     echo Press any key to retry...
     pause >nul
