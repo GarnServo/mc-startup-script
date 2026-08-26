@@ -48,7 +48,11 @@ function Compare-ScriptVersion {
 #  Minecraft version -> minimum Java major version
 #  (Vanilla / Paper / Purpur / Pufferfish / Spigot all follow the
 #  same Mojang-set requirement since they all bundle vanilla code.)
-#  Source-checked Aug 2026; revisit this table when new MC majors ship.
+#
+#  Mojang moved off the old "1.x.y" scheme in early 2026, starting
+#  with version 26.1 - the last old-scheme release was 1.21.11.
+#  Source-checked Aug 2026; revisit this table when new majors ship,
+#  especially if a future year-scheme release bumps Java again.
 # ============================================================
 function Get-RequiredJavaMajor {
     param([string]$McVersion)
@@ -57,7 +61,11 @@ function Get-RequiredJavaMajor {
     while ($parts.Count -lt 3) { $parts += 0 }
     $maj, $min, $pat = $parts[0], $parts[1], $parts[2]
 
-    if ($maj -eq 1 -and $min -ge 21)                         { return 21 }
+    # New year-based scheme (26.1, 26.2, 27.x, ...)
+    if ($maj -ge 26) { return 25 }
+
+    # Old 1.x.y scheme
+    if ($maj -eq 1 -and $min -ge 21)                          { return 21 }
     if ($maj -eq 1 -and $min -eq 20 -and $pat -ge 5)          { return 21 }
     if ($maj -eq 1 -and $min -eq 20)                          { return 17 }
     if ($maj -eq 1 -and $min -eq 19)                          { return 17 }
@@ -144,7 +152,23 @@ function Get-DetectedMcVersion {
 function Get-JavaMajorVersion {
     param([string]$JavaExe)
     try {
-        $out = & $JavaExe -version 2>&1 | Out-String
+        # Capture Java's version output directly; Java writes it to stderr,
+        # which Windows PowerShell represents as ErrorRecord objects.
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $JavaExe
+        $psi.Arguments = '-version'
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $psi
+        [void]$process.Start()
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        $process.Dispose()
+        $out = "$stdout`n$stderr"
         if ($out -match 'version "(\d+)(\.(\d+))?') {
             $first = [int]$Matches[1]
             if ($first -eq 1 -and $Matches[3]) { return [int]$Matches[3] }  # old "1.8.0_xxx" style
@@ -167,31 +191,50 @@ function Find-InstalledJavaRuntimes {
         if (Test-Path $p) { $candidates.Add($p) }
     }
 
-    # Common install roots (Temurin/Adoptium, Oracle, Microsoft, Zulu, Corretto, BellSoft)
+    # Generic scan of common install roots - one level deep is enough for
+    # every vendor layout seen in practice (Adoptium/Temurin, Oracle,
+    # Microsoft Build of OpenJDK, Zulu, Corretto, BellSoft, Semeru,
+    # Liberica, GraalVM, SapMachine, ...). Scanning generically instead of
+    # a fixed vendor allowlist means a vendor I didn't think of still gets
+    # picked up.
     $roots = @(
-        "$env:ProgramFiles\Java",
-        "$env:ProgramFiles\Eclipse Adoptium",
-        "$env:ProgramFiles\Microsoft",
-        "$env:ProgramFiles\Zulu",
-        "$env:ProgramFiles\Amazon Corretto",
-        "$env:ProgramFiles\BellSoft",
-        "${env:ProgramFiles(x86)}\Java"
-    )
+        "$env:ProgramFiles",
+        "${env:ProgramFiles(x86)}",
+        "$env:LocalAppData\Programs",
+        "$env:LocalAppData\JetBrains"   # IDE-bundled JDKs, sometimes the only JDK on a dev machine
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
     foreach ($root in $roots) {
-        if (Test-Path $root) {
-            Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-                $p = Join-Path $_.FullName 'bin\java.exe'
+        Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $vendorDir = $_.FullName
+            # Some vendors (Adoptium, Zulu) nest an extra version folder: Vendor\jdk-25.x\bin\java.exe
+            Get-ChildItem -Path $vendorDir -Filter 'bin' -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue | ForEach-Object {
+                $p = Join-Path $_.FullName 'java.exe'
                 if (Test-Path $p) { $candidates.Add($p) }
             }
         }
     }
 
-    # Registry-registered JDKs (JavaSoft / Adoptium / Microsoft keys)
+    # The official Minecraft Launcher ships its own bundled Java runtimes,
+    # and for a lot of end users that's the *only* Java on the machine.
+    $mcLauncherRoot = Join-Path $env:LocalAppData 'Packages\Microsoft.4297127D64EC9AF_8wekyb3d8bbwe\LocalCache\Local\runtime'
+    if (Test-Path $mcLauncherRoot) {
+        Get-ChildItem -Path $mcLauncherRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            Get-ChildItem -Path $_.FullName -Filter 'java.exe' -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+                $candidates.Add($_.FullName)
+            }
+        }
+    }
+
+    # Registry-registered JDKs - both 64-bit and 32-bit (WOW6432Node)
+    # views, and both machine- and user-scoped installs.
     $regRoots = @(
         'HKLM:\SOFTWARE\JavaSoft\JDK',
         'HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment',
+        'HKLM:\SOFTWARE\WOW6432Node\JavaSoft\JDK',
         'HKLM:\SOFTWARE\Eclipse Adoptium\JDK',
-        'HKLM:\SOFTWARE\Microsoft\JDK'
+        'HKLM:\SOFTWARE\Microsoft\JDK',
+        'HKCU:\SOFTWARE\JavaSoft\JDK'
     )
     foreach ($regRoot in $regRoots) {
         if (Test-Path $regRoot) {
@@ -299,12 +342,25 @@ function Invoke-SetupWizard {
                 Write-Host "Found on this system:"
                 $installed | ForEach-Object { Write-Host "  Java $($_.Major)  -  $($_.Path)" }
             } else {
-                Write-Host "No Java installation could be found at all."
+                Write-Host "No Java installation could be found in the usual locations."
             }
             Write-Host ""
-            Write-Bad "Install Java $reqJava (e.g. https://adoptium.net) and re-run this script."
-            Read-Host "Press Enter to exit"
-            exit 1
+            $manualPath = Read-Host "If Java $reqJava is installed somewhere unusual, paste the full path to java.exe now (or leave blank to exit)"
+            if ($manualPath -and (Test-Path $manualPath)) {
+                $manualMajor = Get-JavaMajorVersion -JavaExe $manualPath
+                if ($manualMajor -ge $reqJava) {
+                    Write-Good "Using Java $manualMajor at $manualPath"
+                    $javaPath = $manualPath
+                } else {
+                    Write-Bad "That's Java $manualMajor, which doesn't meet the Java $reqJava+ requirement."
+                    Read-Host "Press Enter to exit"
+                    exit 1
+                }
+            } else {
+                Write-Bad "Install Java $reqJava (e.g. https://adoptium.net) and re-run this script."
+                Read-Host "Press Enter to exit"
+                exit 1
+            }
         }
     } else {
         Write-Warn2 "Skipping Java version check (version undetermined) - it'll use whatever 'java' resolves to on PATH."
