@@ -19,9 +19,7 @@ $ServerRoot = Split-Path -Parent $ScriptRoot               # server root, one le
 $ConfigPath = Join-Path $ScriptRoot 'StartupScript.json'
 Set-Location $ServerRoot
 
-# ============================================================
-#  Small helpers
-# ============================================================
+#region Helpers
 
 function Write-Info    { param($Message) Write-Host $Message -ForegroundColor Cyan }
 function Write-Good    { param($Message) Write-Host $Message -ForegroundColor Green }
@@ -65,8 +63,7 @@ function Show-ServerDashboard {
     Write-Host ""
 }
 
-# Proper semantic-ish version compare so "v1.10.0" > "v1.9.0" (string
-# comparison in the old batch script got this wrong). Returns -1/0/1.
+# Compare version numbers numerically so v1.10.0 sorts after v1.9.0.
 function Compare-ScriptVersion {
     param([string]$A, [string]$B)
     $an = ($A.TrimStart('v') -split '\.') | ForEach-Object { [int]($_ -replace '\D', '0') }
@@ -80,17 +77,10 @@ function Compare-ScriptVersion {
     }
     return 0
 }
+#endregion
 
-# ============================================================
-#  Minecraft version -> minimum Java major version
-#  (Vanilla / Paper / Purpur / Pufferfish / Spigot all follow the
-#  same Mojang-set requirement since they all bundle vanilla code.)
-#
-#  Mojang moved off the old "1.x.y" scheme in early 2026, starting
-#  with version 26.1 - the last old-scheme release was 1.21.11.
-#  Source-checked Aug 2026; revisit this table when new majors ship,
-#  especially if a future year-scheme release bumps Java again.
-# ============================================================
+#region Minecraft and Java requirements
+# Minecraft 26.1+ uses the year-based version scheme and requires Java 25.
 function Get-RequiredJavaMajor {
     param([string]$McVersion)
     if (-not $McVersion) { return $null }
@@ -98,10 +88,10 @@ function Get-RequiredJavaMajor {
     while ($parts.Count -lt 3) { $parts += 0 }
     $maj, $min, $pat = $parts[0], $parts[1], $parts[2]
 
-    # New year-based scheme (26.1, 26.2, 27.x, ...)
+    # Year-based releases.
     if ($maj -ge 26) { return 25 }
 
-    # Old 1.x.y scheme
+    # Older 1.x releases.
     if ($maj -eq 1 -and $min -ge 21)                          { return 21 }
     if ($maj -eq 1 -and $min -eq 20 -and $pat -ge 5)          { return 21 }
     if ($maj -eq 1 -and $min -eq 20)                          { return 17 }
@@ -112,10 +102,9 @@ function Get-RequiredJavaMajor {
     if ($maj -eq 1 -and $min -ge 12 -and $min -le 16)         { return 11 }
     return 8
 }
+#endregion
 
-# ============================================================
-#  Server jar / server-type autodetection
-# ============================================================
+#region Server detection
 
 function Find-CandidateJars {
     Get-ChildItem -Path $ServerRoot -Filter '*.jar' -File |
@@ -123,8 +112,7 @@ function Find-CandidateJars {
         Sort-Object LastWriteTime -Descending
 }
 
-# Reads version.json out of a runnable server jar (present in vanilla
-# and every Paper-family jar) without extracting the whole archive.
+# Read version.json without extracting the whole jar.
 function Get-McVersionFromJar {
     param([string]$JarPath)
     try {
@@ -145,7 +133,7 @@ function Get-ServerType {
     param([string]$JarPath)
     $name = Split-Path -Leaf $JarPath
 
-    # Forge / NeoForge installer output: run.bat + user_jvm_args.txt + libraries\
+    # Forge and NeoForge expose their launch arguments in libraries.
     $argFile = Get-ChildItem -Path (Join-Path $ServerRoot 'libraries') -Filter '*win_args.txt' -Recurse -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if ($argFile -and (Test-Path (Join-Path $ServerRoot 'user_jvm_args.txt'))) {
@@ -165,7 +153,7 @@ function Get-DetectedMcVersion {
         'plain' {
             $v = Get-McVersionFromJar -JarPath $JarPath
             if ($v) { return $v }
-            # Fallback: pull a version-looking token out of the filename
+            # Fall back to the jar filename when version.json is unavailable.
             if ((Split-Path -Leaf $JarPath) -match '(\d+\.\d+(\.\d+)?)') { return $Matches[1] }
             return $null
         }
@@ -181,16 +169,15 @@ function Get-DetectedMcVersion {
     }
     return $null
 }
+#endregion
 
-# ============================================================
-#  Java runtime discovery
-# ============================================================
+#region Java runtime discovery
 
 function Get-JavaMajorVersion {
     param([string]$JavaExe)
     try {
-        # Capture Java's version output directly; Java writes it to stderr,
-        # which Windows PowerShell represents as ErrorRecord objects.
+        # Java writes its version to stderr; capture it without PowerShell's
+        # native-command error conversion.
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $JavaExe
         $psi.Arguments = '-version'
@@ -218,22 +205,16 @@ function Get-JavaMajorVersion {
 function Find-InstalledJavaRuntimes {
     $candidates = New-Object System.Collections.Generic.List[string]
 
-    # java on PATH
+    # Check PATH and JAVA_HOME first.
     $onPath = Get-Command java -ErrorAction SilentlyContinue
     if ($onPath) { $candidates.Add($onPath.Source) }
 
-    # JAVA_HOME
     if ($env:JAVA_HOME) {
         $p = Join-Path $env:JAVA_HOME 'bin\java.exe'
         if (Test-Path $p) { $candidates.Add($p) }
     }
 
-    # Generic scan of common install roots - one level deep is enough for
-    # every vendor layout seen in practice (Adoptium/Temurin, Oracle,
-    # Microsoft Build of OpenJDK, Zulu, Corretto, BellSoft, Semeru,
-    # Liberica, GraalVM, SapMachine, ...). Scanning generically instead of
-    # a fixed vendor allowlist means a vendor I didn't think of still gets
-    # picked up.
+    # Scan common install roots without relying on vendor names.
     $roots = @(
         "$env:ProgramFiles",
         "${env:ProgramFiles(x86)}",
@@ -244,7 +225,7 @@ function Find-InstalledJavaRuntimes {
     foreach ($root in $roots) {
         Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | ForEach-Object {
             $vendorDir = $_.FullName
-            # Some vendors (Adoptium, Zulu) nest an extra version folder: Vendor\jdk-25.x\bin\java.exe
+            # Some vendors add a version folder below the vendor directory.
             Get-ChildItem -Path $vendorDir -Filter 'bin' -Directory -Recurse -Depth 2 -ErrorAction SilentlyContinue | ForEach-Object {
                 $p = Join-Path $_.FullName 'java.exe'
                 if (Test-Path $p) { $candidates.Add($p) }
@@ -252,8 +233,7 @@ function Find-InstalledJavaRuntimes {
         }
     }
 
-    # The official Minecraft Launcher ships its own bundled Java runtimes,
-    # and for a lot of end users that's the *only* Java on the machine.
+    # Include runtimes bundled with the official Minecraft Launcher.
     $mcLauncherRoot = Join-Path $env:LocalAppData 'Packages\Microsoft.4297127D64EC9AF_8wekyb3d8bbwe\LocalCache\Local\runtime'
     if (Test-Path $mcLauncherRoot) {
         Get-ChildItem -Path $mcLauncherRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
@@ -263,8 +243,7 @@ function Find-InstalledJavaRuntimes {
         }
     }
 
-    # Registry-registered JDKs - both 64-bit and 32-bit (WOW6432Node)
-    # views, and both machine- and user-scoped installs.
+    # Check common machine and user registry locations.
     $regRoots = @(
         'HKLM:\SOFTWARE\JavaSoft\JDK',
         'HKLM:\SOFTWARE\JavaSoft\Java Runtime Environment',
@@ -297,10 +276,9 @@ function Select-BestJava {
     if ($ok) { return $ok[0] }   # closest version that still satisfies the minimum
     return $null
 }
+#endregion
 
-# ============================================================
-#  System RAM
-# ============================================================
+#region Memory
 
 function Get-TotalSystemRamMB {
     try {
@@ -324,16 +302,15 @@ function Convert-RamToMB {
     }
     return $null
 }
+#endregion
 
-# ============================================================
-#  Setup wizard
-# ============================================================
+#region Setup wizard
 
 function Invoke-SetupWizard {
     Write-Brand -Title 'MINECRAFT SERVER SETUP'
     Write-Host "  Let's get your server ready to launch." -ForegroundColor White
 
-    # --- Server jar ---
+    # Pick the server jar.
     Write-Section '1 / 4  Server file' 'Choose the runnable server jar in this folder.'
     $jars = Find-CandidateJars
     $serverJar = $null
@@ -356,7 +333,7 @@ function Invoke-SetupWizard {
         }
     }
 
-    # --- Server type + MC version + Java requirement ---
+    # Work out the server type and runtime requirements.
     Write-Section '2 / 4  Runtime check' 'Detecting server type, Minecraft version, and Java.'
     $serverType = Get-ServerType -JarPath (Join-Path $ServerRoot $serverJar)
     $mcVersion  = Get-DetectedMcVersion -ServerType $serverType -JarPath (Join-Path $ServerRoot $serverJar)
@@ -407,7 +384,7 @@ function Invoke-SetupWizard {
         if ($onPath) { $javaPath = $onPath.Source }
     }
 
-    # --- RAM ---
+    # Set memory limits.
     Write-Section '3 / 4  Memory' 'Choose how much RAM the server may use.'
     $totalRam = Get-TotalSystemRamMB
     $suggestedMax = $null
@@ -434,7 +411,7 @@ function Invoke-SetupWizard {
         if (-not $iniRamMB -or $iniRamMB -gt $maxRamMB) { $iniRamMB = $maxRamMB }
     }
 
-    # --- Behaviour toggles ---
+    # Set optional behavior.
     Write-Section '4 / 4  Server behavior' 'Set restart, GUI, and notification preferences.'
     $autoRestart = (Read-Host "  Auto-restart after a stop or crash? (y/N)") -match '^[Yy]'
     $gui         = (Read-Host "  Enable the server GUI window? (y/N)") -match '^[Yy]'
@@ -470,9 +447,9 @@ function Invoke-SetupWizard {
     return $config
 }
 
-# ============================================================
-#  EULA
-# ============================================================
+#endregion
+
+#region EULA
 
 function Confirm-Eula {
     $eulaPath = Join-Path $ServerRoot 'eula.txt'
@@ -494,18 +471,16 @@ function Confirm-Eula {
         "eula=true"
     ) | Set-Content -Path $eulaPath -Encoding ASCII
 }
+#endregion
 
-# ============================================================
-#  JVM flags (modern, minimal - see chat writeup for rationale)
-# ============================================================
+#region JVM flags
 
 function Get-DefaultJvmFlags {
     '-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=130 -XX:+AlwaysPreTouch'
 }
+#endregion
 
-# ============================================================
-#  Launch command construction
-# ============================================================
+#region Launch command
 
 function Get-LaunchArgs {
     param($Config)
@@ -522,15 +497,14 @@ function Get-LaunchArgs {
             return $heap + ($jvmFlags -split ' ') + @('@user_jvm_args.txt', "@$argFileRel") + $guiFlag
         }
         default {
-            # 'plain' and 'fabric' both run as a normal executable jar
+            # Plain and Fabric servers run as executable jars.
             return $heap + ($jvmFlags -split ' ') + @('-jar', $Config.serverJar) + $guiFlag
         }
     }
 }
+#endregion
 
-# ============================================================
-#  Webhook
-# ============================================================
+#region Discord webhook
 
 function Send-WebhookMessage {
     param([string]$Url, [string]$Message, [string]$Title, [int]$Color)
@@ -568,10 +542,9 @@ function Get-WebhookStopMessage {
     $state = if ($ExitCode -eq 0) { 'stopped normally' } else { 'stopped unexpectedly' }
     return "The server has **$state**.`n`n**Server**  ``$($Config.serverJar)```n**Exit code**  ``$ExitCode``"
 }
+#endregion
 
-# ============================================================
-#  Self-update (updates START.bat + this core.ps1 in place)
-# ============================================================
+#region Self-update
 
 function Invoke-SelfUpdateCheck {
     try {
@@ -597,13 +570,8 @@ function Invoke-SelfUpdateCheck {
         return
     }
 
-    # IMPORTANT: we never overwrite START.bat/core.ps1 while they're the
-    # files actively being executed - cmd.exe tracks a byte offset into a
-    # running .bat, so modifying it mid-run can corrupt execution. Instead
-    # we write a small, disposable "Updater.bat" that does the download +
-    # swap in a *fresh* process after this one has exited, then relaunches
-    # START.bat and deletes itself. This mirrors the original script's
-    # daughter-script trick, just applied to two files instead of one.
+    # Swap files from a separate process after this script exits. Updating a
+    # running batch file in place can leave cmd.exe reading the wrong offset.
     $updaterPath = Join-Path $ServerRoot 'Updater.bat'
     $batUrl  = $batAsset.browser_download_url
     $coreUrl = $coreAsset.browser_download_url
@@ -625,10 +593,9 @@ del "%~f0"
     Start-Process -FilePath $updaterPath -WorkingDirectory $ServerRoot
     exit 0
 }
+#endregion
 
-# ============================================================
-#  Main
-# ============================================================
+#region Main loop
 
 function Get-Config {
     if (-not (Test-Path $ConfigPath)) { return Invoke-SetupWizard }
@@ -686,7 +653,7 @@ while ($true) {
         continue
     }
 
-    # Crash-loop protection: if we've restarted 5+ times inside 5 minutes, pause.
+    # Pause after repeated failures so a broken server does not restart forever.
     $restartCount++
     $now = Get-Date
     $restartTimestamps.Add($now)
@@ -700,3 +667,4 @@ while ($true) {
     Write-Host "  Restarting (attempt #$restartCount)..." -ForegroundColor Yellow
     Invoke-SelfUpdateCheck
 }
+#endregion
