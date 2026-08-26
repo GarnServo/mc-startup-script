@@ -47,6 +47,17 @@ function Write-StatusRow {
     Write-Host ("  {0,-16}" -f $Label) -ForegroundColor DarkGray -NoNewline
     Write-Host $Value -ForegroundColor $Color
 }
+function Read-YesNo {
+    param([string]$Prompt, [bool]$Default = $false)
+    $hint = if ($Default) { '[Y/n]' } else { '[y/N]' }
+    $answer = Read-Host ("  {0} {1}" -f $Prompt, $hint)
+    if ([string]::IsNullOrWhiteSpace($answer)) { return $Default }
+    return $answer.Trim() -match '^(?i:y|yes)$'
+}
+function Wait-ForEnter {
+    param([string]$Prompt = 'Press Enter to continue')
+    [void](Read-Host ("  {0} [Enter]" -f $Prompt))
+}
 function Show-ServerDashboard {
     param($Config, [int]$RestartCount)
     Write-Brand
@@ -317,13 +328,18 @@ function Invoke-SetupWizard {
     $serverJar = $null
     if ($jars.Count -eq 1) {
         Write-StatusRow 'Detected' $jars[0].Name Cyan
-        $confirm = Read-Host "  Use this file? (Y/n)"
-        if ($confirm -eq '' -or $confirm -match '^[Yy]') { $serverJar = $jars[0].Name }
+        if (Read-YesNo -Prompt 'Use this file?' -Default $true) { $serverJar = $jars[0].Name }
     } elseif ($jars.Count -gt 1) {
         Write-Host "  Multiple jar files found:" -ForegroundColor White
         for ($i = 0; $i -lt $jars.Count; $i++) { Write-Host ("  [{0}] {1}" -f $i, $jars[$i].Name) -ForegroundColor White }
         $idx = Read-Host "  Select a server jar by number"
-        if ($idx -match '^\d+$' -and [int]$idx -lt $jars.Count) { $serverJar = $jars[[int]$idx].Name }
+        if ($idx -match '^\d+$' -and [int]$idx -ge 0 -and [int]$idx -lt $jars.Count) {
+            $serverJar = $jars[[int]$idx].Name
+        } else {
+            Write-Warn2 "  That selection was not valid."
+        }
+    } else {
+        Write-Warn2 "  No server jars were found in this folder."
     }
     while (-not $serverJar -or -not (Test-Path (Join-Path $ServerRoot $serverJar))) {
         $serverJar = Read-Host "  Enter the filename of your server .jar file"
@@ -370,12 +386,12 @@ function Invoke-SetupWizard {
                     $javaPath = $manualPath
                 } else {
                     Write-Bad "  Java $manualMajor does not meet the Java $reqJava+ requirement."
-                    Read-Host "  Press Enter to exit"
+                    Wait-ForEnter -Prompt 'Press Enter to exit'
                     exit 1
                 }
             } else {
                 Write-Bad "  Install Java $reqJava (for example, https://adoptium.net) and re-run this script."
-                Read-Host "  Press Enter to exit"
+                Wait-ForEnter -Prompt 'Press Enter to exit'
                 exit 1
             }
         }
@@ -409,18 +425,21 @@ function Invoke-SetupWizard {
     if ($in -eq '') { $iniRamMB = $maxRamMB }
     else {
         $iniRamMB = Convert-RamToMB $in
-        if (-not $iniRamMB -or $iniRamMB -gt $maxRamMB) { $iniRamMB = $maxRamMB }
+        if (-not $iniRamMB -or $iniRamMB -gt $maxRamMB) {
+            Write-Warn2 "  Initial RAM must be a valid value no larger than the maximum. Using $maxRamMB."
+            $iniRamMB = $maxRamMB
+        }
     }
 
     # Set optional behavior.
     Write-Section '4 / 4  Server behavior' 'Set restart, GUI, and notification preferences.'
-    $autoRestart = (Read-Host "  Auto-restart after a stop or crash? (y/N)") -match '^[Yy]'
-    $gui         = (Read-Host "  Enable the server GUI window? (y/N)") -match '^[Yy]'
+    $autoRestart = Read-YesNo -Prompt 'Auto-restart after a stop or crash?' -Default $false
+    $gui         = Read-YesNo -Prompt 'Enable the server GUI window?' -Default $false
 
     $webhookUrl = $null
     $webhookStart = $null
     $webhookStop = $null
-    if ((Read-Host "  Enable Discord start/stop notifications? (y/N)") -match '^[Yy]') {
+    if (Read-YesNo -Prompt 'Enable Discord start/stop notifications?' -Default $false) {
         $webhookUrl = Read-Host "  Discord webhook URL"
         Write-Good "  Default formatted start and stop messages enabled."
     }
@@ -461,8 +480,7 @@ function Confirm-Eula {
     Write-Brand -Title 'MINECRAFT EULA'
     Write-Host "  Running this server requires accepting Mojang's EULA." -ForegroundColor White
     Write-Host "  https://aka.ms/MinecraftEULA" -ForegroundColor Cyan
-    $agree = Read-Host "`n  Do you accept? (yes/no)"
-    if ($agree -notmatch '^(y|yes)$') {
+    if (-not (Read-YesNo -Prompt "`nDo you accept Mojang's EULA?" -Default $false)) {
         Write-Bad "  EULA not accepted. Exiting."
         exit 1
     }
@@ -556,18 +574,17 @@ function Invoke-SelfUpdateCheck {
     }
     if (-not $release.tag_name) { return }
     if ((Compare-ScriptVersion $release.tag_name $CoreVersion) -le 0) {
-        Write-Host "mc-startup-script is up to date ($CoreVersion)."
+        Write-Host "  mc-startup-script is up to date ($CoreVersion)." -ForegroundColor DarkGray
         return
     }
 
-    Write-Info "Update available: $CoreVersion -> $($release.tag_name)"
-    $doUpdate = Read-Host "Update now? (Y/n)"
-    if ($doUpdate -ne '' -and $doUpdate -notmatch '^[Yy]') { return }
+    Write-Section 'Update available' "$CoreVersion  ->  $($release.tag_name)"
+    if (-not (Read-YesNo -Prompt 'Download and install it now?' -Default $true)) { return }
 
     $batAsset  = $release.assets | Where-Object { $_.name -eq 'START.bat' }
     $coreAsset = $release.assets | Where-Object { $_.name -eq 'core.ps1' }
     if (-not $batAsset -or -not $coreAsset) {
-        Write-Warn2 "Release $($release.tag_name) is missing expected assets (START.bat / core.ps1) - skipping update."
+        Write-Warn2 "  The release is missing START.bat or core.ps1. Update skipped."
         return
     }
 
@@ -589,7 +606,7 @@ start "" "START.bat"
 del "%~f0"
 "@ | Set-Content -Path $updaterPath -Encoding ASCII
 
-    Write-Good "Downloading update to $($release.tag_name) and restarting..."
+    Write-Good "  Downloading $($release.tag_name) and restarting..."
     Start-Sleep -Seconds 1
     Start-Process -FilePath $updaterPath -WorkingDirectory $ServerRoot
     exit 0
@@ -643,12 +660,11 @@ while ($true) {
 
     Send-WebhookMessage -Url $config.webhookUrl -Message (Get-WebhookStopMessage -Config $config -ExitCode $exitCode) `
         -Title "$([char]::ConvertFromUtf32(0x1F534)) Server stopped" -Color 15548997
-    Write-Host ""
-    Write-Warn2 "  Server process exited with code $exitCode."
+    Write-Section 'Server stopped' "Process exited with code $exitCode."
 
     if (-not $config.autoRestart) {
-        $again = Read-Host "  Restart the server? (y/N)"
-        if ($again -notmatch '^[Yy]') {
+        Write-Host "  Automatic restart is disabled." -ForegroundColor DarkGray
+        if (-not (Read-YesNo -Prompt 'Restart the server?' -Default $false)) {
             Write-Host "  Exiting."
             break
         }
