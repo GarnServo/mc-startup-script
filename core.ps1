@@ -18,6 +18,7 @@ $ScriptRoot = Split-Path -Parent $PSCommandPath           # ...\config
 $ServerRoot = Split-Path -Parent $ScriptRoot               # server root, one level up
 $ConfigPath = Join-Path $ScriptRoot 'StartupScript.json'
 Set-Location $ServerRoot
+Remove-Variable ScriptRoot
 
 #region Helpers
 
@@ -637,6 +638,8 @@ while ($true) {
     $javaExe = if ($config.javaPath) { $config.javaPath } else { 'java' }
     & $javaExe @launchArgs
     $exitCode = $LASTEXITCODE
+    $launchArgs = $null
+    $javaExe = $null
 
     Send-WebhookMessage -Url $config.webhookUrl -Message (Get-WebhookStopMessage -Config $config -ExitCode $exitCode) `
         -Title "$([char]::ConvertFromUtf32(0x1F534)) Server stopped" -Color 15548997
@@ -657,9 +660,14 @@ while ($true) {
     $restartCount++
     $now = Get-Date
     $restartTimestamps.Add($now)
-    $recent = $restartTimestamps | Where-Object { $_ -gt $now.AddMinutes(-5) }
-    if ($recent.Count -ge 5) {
-        Write-Bad "  Server has stopped $($recent.Count) times in 5 minutes. Pausing 60s to prevent a crash loop."
+    while ($restartTimestamps.Count -gt 0 -and $restartTimestamps[0] -le $now.AddMinutes(-5)) {
+        $restartTimestamps.RemoveAt(0)
+    }
+    while ($restartTimestamps.Count -gt 5) {
+        $restartTimestamps.RemoveAt(0)
+    }
+    if ($restartTimestamps.Count -ge 5) {
+        Write-Bad "  Server has stopped $($restartTimestamps.Count) times in 5 minutes. Pausing 60s to prevent a crash loop."
         Start-Sleep -Seconds 60
     } else {
         Start-Sleep -Seconds 2
