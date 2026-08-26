@@ -443,11 +443,8 @@ function Invoke-SetupWizard {
     $webhookStart = $null
     $webhookStop = $null
     if ((Read-Host "  Enable Discord start/stop notifications? (y/N)") -match '^[Yy]') {
-        $webhookUrl   = Read-Host "  Discord webhook URL"
-        $webhookStart = Read-Host "  Start message [Server starting...]"
-        if ($webhookStart -eq '') { $webhookStart = 'Server starting...' }
-        $webhookStop  = Read-Host "  Stop message [Server has stopped.]"
-        if ($webhookStop -eq '') { $webhookStop = 'Server has stopped.' }
+        $webhookUrl = Read-Host "  Discord webhook URL"
+        Write-Good "  Default formatted start and stop messages enabled."
     }
 
     $config = [PSCustomObject]@{
@@ -549,8 +546,9 @@ function Send-WebhookMessage {
                 timestamp = (Get-Date).ToUniversalTime().ToString('o')
             })
         } | ConvertTo-Json -Depth 5
-        Invoke-RestMethod -Uri $Url -Method Post -ContentType 'application/json' `
-            -Body $payload -TimeoutSec 10 | Out-Null
+        $payloadBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
+        Invoke-RestMethod -Uri $Url -Method Post -ContentType 'application/json; charset=utf-8' `
+            -Body $payloadBytes -TimeoutSec 10 | Out-Null
     } catch {
         Write-Warn2 "Webhook notification failed: $($_.Exception.Message)"
     }
@@ -667,14 +665,14 @@ while ($true) {
     Show-ServerDashboard -Config $config -RestartCount $restartCount
 
     Send-WebhookMessage -Url $config.webhookUrl -Message (Get-WebhookStartMessage -Config $config) `
-        -Title '🟢 Server starting' -Color 5763719
+        -Title "$([char]::ConvertFromUtf32(0x1F7E2)) Server starting" -Color 5763719
 
     $javaExe = if ($config.javaPath) { $config.javaPath } else { 'java' }
     & $javaExe @launchArgs
     $exitCode = $LASTEXITCODE
 
     Send-WebhookMessage -Url $config.webhookUrl -Message (Get-WebhookStopMessage -Config $config -ExitCode $exitCode) `
-        -Title '🔴 Server stopped' -Color 15548997
+        -Title "$([char]::ConvertFromUtf32(0x1F534)) Server stopped" -Color 15548997
     Write-Host ""
     Write-Warn2 "  Server process exited with code $exitCode."
 
