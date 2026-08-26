@@ -27,6 +27,43 @@ function Write-Info    { param($Message) Write-Host $Message -ForegroundColor Cy
 function Write-Good    { param($Message) Write-Host $Message -ForegroundColor Green }
 function Write-Warn2   { param($Message) Write-Host $Message -ForegroundColor Yellow }
 function Write-Bad     { param($Message) Write-Host $Message -ForegroundColor Red }
+function Write-Rule    { Write-Host ('-' * 64) -ForegroundColor DarkGray }
+function Write-Section {
+    param([string]$Title, [string]$Subtitle)
+    Write-Host ""
+    Write-Host ("  {0}" -f $Title.ToUpper()) -ForegroundColor Cyan
+    if ($Subtitle) { Write-Host ("  {0}" -f $Subtitle) -ForegroundColor DarkGray }
+    Write-Rule
+}
+function Write-Brand {
+    param([string]$Title = 'MINECRAFT SERVER CONTROL')
+    Clear-Host
+    Write-Host ""
+    Write-Host ("  {0}" -f $Title) -ForegroundColor Cyan
+    Write-Host ("  mc-startup-script {0}" -f $CoreVersion) -ForegroundColor DarkGray
+    Write-Rule
+}
+function Write-StatusRow {
+    param([string]$Label, [string]$Value, [ConsoleColor]$Color = [ConsoleColor]::White)
+    Write-Host ("  {0,-16}" -f $Label) -ForegroundColor DarkGray -NoNewline
+    Write-Host $Value -ForegroundColor $Color
+}
+function Show-ServerDashboard {
+    param($Config, [int]$RestartCount)
+    Write-Brand
+    Write-Host "  SERVER STATUS" -ForegroundColor Cyan
+    Write-Rule
+    Write-StatusRow 'Server' $Config.serverJar
+    Write-StatusRow 'Type' ("{0}{1}" -f $Config.serverType, $(if ($Config.mcVersion) { "  |  MC $($Config.mcVersion)" } else { '' }))
+    Write-StatusRow 'Memory' "$($Config.iniRam) initial  |  $($Config.maxRam) max"
+    Write-StatusRow 'Java' ("Java {0}" -f (Get-JavaMajorVersion -JavaExe $Config.javaPath))
+    Write-StatusRow 'Auto-restart' $(if ($Config.autoRestart) { 'Enabled' } else { 'Ask on exit' }) $(if ($Config.autoRestart) { 'Green' } else { 'Yellow' })
+    Write-StatusRow 'Restarts' $RestartCount
+    Write-Host ""
+    Write-Host "  Launching server..." -ForegroundColor Green
+    Write-Host "  Server output will appear below." -ForegroundColor DarkGray
+    Write-Host ""
+}
 
 # Proper semantic-ish version compare so "v1.10.0" > "v1.9.0" (string
 # comparison in the old batch script got this wrong). Returns -1/0/1.
@@ -293,102 +330,104 @@ function Convert-RamToMB {
 # ============================================================
 
 function Invoke-SetupWizard {
-    Clear-Host
-    Write-Info "=== mc-startup-script initial setup ($CoreVersion) ==="
-    Write-Host ""
+    Write-Brand -Title 'MINECRAFT SERVER SETUP'
+    Write-Host "  Let's get your server ready to launch." -ForegroundColor White
 
     # --- Server jar ---
+    Write-Section '1 / 4  Server file' 'Choose the runnable server jar in this folder.'
     $jars = Find-CandidateJars
     $serverJar = $null
     if ($jars.Count -eq 1) {
-        Write-Host "Found server jar: $($jars[0].Name)"
-        $confirm = Read-Host "Use this file? (Y/n)"
+        Write-StatusRow 'Detected' $jars[0].Name Cyan
+        $confirm = Read-Host "  Use this file? (Y/n)"
         if ($confirm -eq '' -or $confirm -match '^[Yy]') { $serverJar = $jars[0].Name }
     } elseif ($jars.Count -gt 1) {
-        Write-Host "Multiple jar files found:"
-        for ($i = 0; $i -lt $jars.Count; $i++) { Write-Host "  [$i] $($jars[$i].Name)" }
-        $idx = Read-Host "Select the server jar by number"
+        Write-Host "  Multiple jar files found:" -ForegroundColor White
+        for ($i = 0; $i -lt $jars.Count; $i++) { Write-Host ("  [{0}] {1}" -f $i, $jars[$i].Name) -ForegroundColor White }
+        $idx = Read-Host "  Select a server jar by number"
         if ($idx -match '^\d+$' -and [int]$idx -lt $jars.Count) { $serverJar = $jars[[int]$idx].Name }
     }
     while (-not $serverJar -or -not (Test-Path (Join-Path $ServerRoot $serverJar))) {
-        $serverJar = Read-Host "Enter the filename of your server .jar file"
+        $serverJar = Read-Host "  Enter the filename of your server .jar file"
         if ($serverJar -and ($serverJar -notlike '*.jar')) { $serverJar += '.jar' }
         if (-not (Test-Path (Join-Path $ServerRoot $serverJar))) {
-            Write-Bad "File `"$serverJar`" not found."
+            Write-Bad "  File `"$serverJar`" was not found."
             $serverJar = $null
         }
     }
 
     # --- Server type + MC version + Java requirement ---
+    Write-Section '2 / 4  Runtime check' 'Detecting server type, Minecraft version, and Java.'
     $serverType = Get-ServerType -JarPath (Join-Path $ServerRoot $serverJar)
     $mcVersion  = Get-DetectedMcVersion -ServerType $serverType -JarPath (Join-Path $ServerRoot $serverJar)
     $reqJava    = Get-RequiredJavaMajor -McVersion $mcVersion
 
-    Write-Host ""
-    Write-Host "Detected server type : $($serverType.Type)"
-    if ($mcVersion) { Write-Host "Detected MC version  : $mcVersion (needs Java $reqJava+)" }
-    else            { Write-Warn2 "Could not auto-detect the Minecraft version from this jar." }
+    Write-StatusRow 'Server type' $serverType.Type
+    if ($mcVersion) { Write-StatusRow 'Minecraft' "$mcVersion  (Java $reqJava+)" }
+    else            { Write-Warn2 '  Minecraft version could not be detected from this jar.' }
 
     $javaPath = $null
     if ($reqJava) {
         $installed = Find-InstalledJavaRuntimes
         $best = Select-BestJava -RequiredMajor $reqJava -Installed $installed
         if ($best) {
-            Write-Good "Using Java $($best.Major) at $($best.Path)"
+            Write-Good "  Java $($best.Major) ready"
+            Write-Host "  $($best.Path)" -ForegroundColor DarkGray
             $javaPath = $best.Path
         } else {
-            Write-Bad "No installed Java runtime satisfies the requirement (Java $reqJava+)."
+            Write-Bad "  No installed Java runtime satisfies Java $reqJava+."
             if ($installed) {
-                Write-Host "Found on this system:"
-                $installed | ForEach-Object { Write-Host "  Java $($_.Major)  -  $($_.Path)" }
+                Write-Host "  Found on this system:" -ForegroundColor White
+                $installed | ForEach-Object { Write-Host "    Java $($_.Major)  $($_.Path)" -ForegroundColor DarkGray }
             } else {
-                Write-Host "No Java installation could be found in the usual locations."
+                Write-Host "  No Java installation found in the usual locations." -ForegroundColor White
             }
             Write-Host ""
-            $manualPath = Read-Host "If Java $reqJava is installed somewhere unusual, paste the full path to java.exe now (or leave blank to exit)"
+            $manualPath = Read-Host "  Paste a java.exe path if it is installed elsewhere (or leave blank to exit)"
             if ($manualPath -and (Test-Path $manualPath)) {
                 $manualMajor = Get-JavaMajorVersion -JavaExe $manualPath
                 if ($manualMajor -ge $reqJava) {
-                    Write-Good "Using Java $manualMajor at $manualPath"
+                    Write-Good "  Java $manualMajor ready"
+                    Write-Host "  $manualPath" -ForegroundColor DarkGray
                     $javaPath = $manualPath
                 } else {
-                    Write-Bad "That's Java $manualMajor, which doesn't meet the Java $reqJava+ requirement."
-                    Read-Host "Press Enter to exit"
+                    Write-Bad "  Java $manualMajor does not meet the Java $reqJava+ requirement."
+                    Read-Host "  Press Enter to exit"
                     exit 1
                 }
             } else {
-                Write-Bad "Install Java $reqJava (e.g. https://adoptium.net) and re-run this script."
-                Read-Host "Press Enter to exit"
+                Write-Bad "  Install Java $reqJava (for example, https://adoptium.net) and re-run this script."
+                Read-Host "  Press Enter to exit"
                 exit 1
             }
         }
     } else {
-        Write-Warn2 "Skipping Java version check (version undetermined) - it'll use whatever 'java' resolves to on PATH."
+        Write-Warn2 "  Java version check skipped; using the java command on PATH."
         $onPath = Get-Command java -ErrorAction SilentlyContinue
         if ($onPath) { $javaPath = $onPath.Source }
     }
 
     # --- RAM ---
-    Write-Host ""
+    Write-Section '3 / 4  Memory' 'Choose how much RAM the server may use.'
     $totalRam = Get-TotalSystemRamMB
     $suggestedMax = $null
     if ($totalRam) {
         $suggestedMax = [Math]::Round(($totalRam * 0.7) / 512) * 512
-        Write-Host "System RAM: $([Math]::Round($totalRam/1024,1))G detected. Suggested max heap: $(Format-RamMB $suggestedMax)"
+        Write-StatusRow 'System memory' "$([Math]::Round($totalRam/1024,1))G  |  suggested max $(Format-RamMB $suggestedMax)"
     }
     do {
-        $prompt = if ($suggestedMax) { "Maximum RAM allocation [$(Format-RamMB $suggestedMax)]" } else { "Maximum RAM allocation (e.g. 4G)" }
+        $prompt = if ($suggestedMax) { "  Maximum RAM [$(Format-RamMB $suggestedMax)]" } else { "  Maximum RAM (e.g. 4G)" }
         $in = Read-Host $prompt
         if ($in -eq '' -and $suggestedMax) { $maxRamMB = $suggestedMax }
         else { $maxRamMB = Convert-RamToMB $in }
-        if (-not $maxRamMB) { Write-Bad "Enter a value like 4G or 4096M." }
+        if (-not $maxRamMB) { Write-Bad "  Enter a value like 4G or 4096M." }
         elseif ($totalRam -and $maxRamMB -gt ($totalRam * 0.8)) {
-            Write-Bad "That exceeds 80% of system RAM ($([Math]::Round($totalRam*0.8/1024,1))G). Choose a lower value."
+            Write-Bad "  That exceeds 80% of system RAM. Choose a lower value."
             $maxRamMB = $null
         }
     } while (-not $maxRamMB)
 
-    $in = Read-Host "Initial RAM allocation [$(Format-RamMB $maxRamMB)] (modern guidance: keep this equal to max to avoid heap-resize pauses)"
+    $in = Read-Host "  Initial RAM [$(Format-RamMB $maxRamMB)]"
     if ($in -eq '') { $iniRamMB = $maxRamMB }
     else {
         $iniRamMB = Convert-RamToMB $in
@@ -396,19 +435,18 @@ function Invoke-SetupWizard {
     }
 
     # --- Behaviour toggles ---
-    Write-Host ""
-    $autoRestart = (Read-Host "Auto-restart the server on crash/stop? (y/N)") -match '^[Yy]'
-    $gui         = (Read-Host "Enable server GUI window? (y/N)") -match '^[Yy]'
+    Write-Section '4 / 4  Server behavior' 'Set restart, GUI, and notification preferences.'
+    $autoRestart = (Read-Host "  Auto-restart after a stop or crash? (y/N)") -match '^[Yy]'
+    $gui         = (Read-Host "  Enable the server GUI window? (y/N)") -match '^[Yy]'
 
-    Write-Host ""
     $webhookUrl = $null
     $webhookStart = $null
     $webhookStop = $null
-    if ((Read-Host "Set up Discord webhook start/stop notifications? (y/N)") -match '^[Yy]') {
-        $webhookUrl   = Read-Host "Discord webhook URL"
-        $webhookStart = Read-Host "Start message [Server starting...]"
+    if ((Read-Host "  Enable Discord start/stop notifications? (y/N)") -match '^[Yy]') {
+        $webhookUrl   = Read-Host "  Discord webhook URL"
+        $webhookStart = Read-Host "  Start message [Server starting...]"
         if ($webhookStart -eq '') { $webhookStart = 'Server starting...' }
-        $webhookStop  = Read-Host "Stop message [Server has stopped.]"
+        $webhookStop  = Read-Host "  Stop message [Server has stopped.]"
         if ($webhookStop -eq '') { $webhookStop = 'Server has stopped.' }
     }
 
@@ -428,7 +466,9 @@ function Invoke-SetupWizard {
         jvmFlags      = $null   # null = use built-in modern defaults; set a string here to override
     }
     $config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
-    Write-Good "`nConfiguration saved to $ConfigPath"
+    Write-Section 'Setup complete' 'Your server is ready for launch.'
+    Write-Good "  Configuration saved"
+    Write-Host "  $ConfigPath" -ForegroundColor DarkGray
     Start-Sleep -Seconds 1
     return $config
 }
@@ -443,13 +483,12 @@ function Confirm-Eula {
         $content = Get-Content $eulaPath -Raw
         if ($content -match 'eula\s*=\s*true') { return }
     }
-    Clear-Host
-    Write-Info "=== Minecraft EULA ==="
-    Write-Host "Running this server requires accepting Mojang's EULA:"
-    Write-Host "https://aka.ms/MinecraftEULA"
-    $agree = Read-Host "`nDo you accept? (yes/no)"
+    Write-Brand -Title 'MINECRAFT EULA'
+    Write-Host "  Running this server requires accepting Mojang's EULA." -ForegroundColor White
+    Write-Host "  https://aka.ms/MinecraftEULA" -ForegroundColor Cyan
+    $agree = Read-Host "`n  Do you accept? (yes/no)"
     if ($agree -notmatch '^(y|yes)$') {
-        Write-Bad "EULA not accepted. Exiting."
+        Write-Bad "  EULA not accepted. Exiting."
         exit 1
     }
     @(
@@ -497,14 +536,39 @@ function Get-LaunchArgs {
 # ============================================================
 
 function Send-WebhookMessage {
-    param([string]$Url, [string]$Message)
+    param([string]$Url, [string]$Message, [string]$Title, [int]$Color)
     if (-not $Url -or -not $Message) { return }
     try {
+        $payload = @{
+            username = 'Minecraft Server'
+            embeds   = @(@{
+                title     = $Title
+                description = $Message
+                color     = $Color
+                footer    = @{ text = "mc-startup-script $CoreVersion" }
+                timestamp = (Get-Date).ToUniversalTime().ToString('o')
+            })
+        } | ConvertTo-Json -Depth 5
         Invoke-RestMethod -Uri $Url -Method Post -ContentType 'application/json' `
-            -Body (@{ content = $Message } | ConvertTo-Json) -TimeoutSec 10 | Out-Null
+            -Body $payload -TimeoutSec 10 | Out-Null
     } catch {
         Write-Warn2 "Webhook notification failed: $($_.Exception.Message)"
     }
+}
+
+function Get-WebhookStartMessage {
+    param($Config)
+    if ($Config.webhookStart -and $Config.webhookStart -ne 'Server starting...') { return $Config.webhookStart }
+    return "The server is coming online.`n`n**Server**  ``$($Config.serverJar)```n**Minecraft**  ``$($Config.mcVersion)```n**Memory**  ``$($Config.maxRam)``"
+}
+
+function Get-WebhookStopMessage {
+    param($Config, [int]$ExitCode)
+    if ($Config.webhookStop -and $Config.webhookStop -ne 'Server has stopped.') {
+        return "$($Config.webhookStop)`n`n**Exit code**  ``$ExitCode``"
+    }
+    $state = if ($ExitCode -eq 0) { 'stopped normally' } else { 'stopped unexpectedly' }
+    return "The server has **$state**.`n`n**Server**  ``$($Config.serverJar)```n**Exit code**  ``$ExitCode``"
 }
 
 # ============================================================
@@ -600,28 +664,24 @@ while ($true) {
     $launchArgs = Get-LaunchArgs -Config $config
     $Host.UI.RawUI.WindowTitle = "$($config.serverJar) | Restarts: $restartCount"
 
-    Write-Host ""
-    Write-Good ".............................................`n"
-    Write-Host "Server        : $($config.serverJar)"
-    Write-Host "Type          : $($config.serverType)$(if($config.mcVersion){" (MC $($config.mcVersion))"})"
-    Write-Host "RAM           : $($config.iniRam) / $($config.maxRam)"
-    Write-Host "Auto-restart  : $($config.autoRestart)"
-    Write-Good ".............................................`n"
+    Show-ServerDashboard -Config $config -RestartCount $restartCount
 
-    Send-WebhookMessage -Url $config.webhookUrl -Message $config.webhookStart
+    Send-WebhookMessage -Url $config.webhookUrl -Message (Get-WebhookStartMessage -Config $config) `
+        -Title '🟢 Server starting' -Color 5763719
 
     $javaExe = if ($config.javaPath) { $config.javaPath } else { 'java' }
     & $javaExe @launchArgs
     $exitCode = $LASTEXITCODE
 
-    Send-WebhookMessage -Url $config.webhookUrl -Message $config.webhookStop
+    Send-WebhookMessage -Url $config.webhookUrl -Message (Get-WebhookStopMessage -Config $config -ExitCode $exitCode) `
+        -Title '🔴 Server stopped' -Color 15548997
     Write-Host ""
-    Write-Warn2 "Server process exited (code $exitCode)."
+    Write-Warn2 "  Server process exited with code $exitCode."
 
     if (-not $config.autoRestart) {
-        $again = Read-Host "Restart the server? (y/N)"
+        $again = Read-Host "  Restart the server? (y/N)"
         if ($again -notmatch '^[Yy]') {
-            Write-Host "Exiting."
+            Write-Host "  Exiting."
             break
         }
         Invoke-SelfUpdateCheck
@@ -634,11 +694,11 @@ while ($true) {
     $restartTimestamps.Add($now)
     $recent = $restartTimestamps | Where-Object { $_ -gt $now.AddMinutes(-5) }
     if ($recent.Count -ge 5) {
-        Write-Bad "Server has crashed $($recent.Count) times in the last 5 minutes - pausing for 60s to avoid a hard crash loop."
+        Write-Bad "  Server has stopped $($recent.Count) times in 5 minutes. Pausing 60s to prevent a crash loop."
         Start-Sleep -Seconds 60
     } else {
         Start-Sleep -Seconds 2
     }
-    Write-Host "Restarting (restart #$restartCount)..."
+    Write-Host "  Restarting (attempt #$restartCount)..." -ForegroundColor Yellow
     Invoke-SelfUpdateCheck
 }
