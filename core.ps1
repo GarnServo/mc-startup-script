@@ -11,9 +11,9 @@
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$CoreVersion   = 'v2.2.0'
+$CoreVersion = 'v2.2.0'
 $ConfigVersion = 2
-$RepoSlug      = 'GarnServo/mc-startup-script'
+$RepoSlug = 'GarnServo/mc-startup-script'
 
 $ScriptRoot = Split-Path -Parent $PSCommandPath           # ...\config
 $ServerRoot = Split-Path -Parent $ScriptRoot               # server root, one level up
@@ -24,10 +24,10 @@ Remove-Variable ScriptRoot
 
 #region Helpers
 
-function Write-Good    { param($Message) Write-Host $Message -ForegroundColor Green }
-function Write-Warn2   { param($Message) Write-Host $Message -ForegroundColor Yellow }
-function Write-Bad     { param($Message) Write-Host $Message -ForegroundColor Red }
-function Write-Rule    { Write-Host ('-' * 64) -ForegroundColor DarkGray }
+function Write-Good { param($Message) Write-Host $Message -ForegroundColor Green }
+function Write-Warn2 { param($Message) Write-Host $Message -ForegroundColor Yellow }
+function Write-Bad { param($Message) Write-Host $Message -ForegroundColor Red }
+function Write-Rule { Write-Host ('-' * 64) -ForegroundColor DarkGray }
 function Write-Section {
     param([string]$Title, [string]$Subtitle)
     Write-Host ""
@@ -124,14 +124,14 @@ function Get-FallbackJavaMajor {
     if ($maj -ge 26) { return 25 }
 
     # Older 1.x releases.
-    if ($maj -eq 1 -and $min -ge 21)                          { return 21 }
-    if ($maj -eq 1 -and $min -eq 20 -and $pat -ge 5)          { return 21 }
-    if ($maj -eq 1 -and $min -eq 20)                          { return 17 }
-    if ($maj -eq 1 -and $min -eq 19)                          { return 17 }
-    if ($maj -eq 1 -and $min -eq 18)                          { return 17 }
-    if ($maj -eq 1 -and $min -eq 17)                          { return 17 }
-    if ($maj -eq 1 -and $min -eq 16 -and $pat -ge 5)          { return 16 }
-    if ($maj -eq 1 -and $min -ge 12 -and $min -le 16)         { return 11 }
+    if ($maj -eq 1 -and $min -ge 21) { return 21 }
+    if ($maj -eq 1 -and $min -eq 20 -and $pat -ge 5) { return 21 }
+    if ($maj -eq 1 -and $min -eq 20) { return 17 }
+    if ($maj -eq 1 -and $min -eq 19) { return 17 }
+    if ($maj -eq 1 -and $min -eq 18) { return 17 }
+    if ($maj -eq 1 -and $min -eq 17) { return 17 }
+    if ($maj -eq 1 -and $min -eq 16 -and $pat -ge 5) { return 16 }
+    if ($maj -eq 1 -and $min -ge 12 -and $min -le 16) { return 11 }
     return 8
 }
 
@@ -154,15 +154,16 @@ function Get-RequiredJavaMajor {
             if ($metadata.javaVersion.majorVersion) {
                 $cache = @($cache | Where-Object { $_.version -ne $McVersion })
                 $cache += [PSCustomObject]@{
-                    version = $McVersion
+                    version      = $McVersion
                     majorVersion = [int]$metadata.javaVersion.majorVersion
-                    checkedAt = (Get-Date).ToUniversalTime().ToString('o')
+                    checkedAt    = (Get-Date).ToUniversalTime().ToString('o')
                 }
                 $cache | ConvertTo-Json -Depth 4 | Set-Content -Path $JavaRequirementsCachePath -Encoding UTF8
                 return [int]$metadata.javaVersion.majorVersion
             }
         }
-    } catch {
+    }
+    catch {
         # A network failure should never prevent a known version from starting.
     }
 
@@ -174,8 +175,8 @@ function Get-RequiredJavaMajor {
 
 function Find-CandidateJars {
     Get-ChildItem -Path $ServerRoot -Filter '*.jar' -File |
-        Where-Object { $_.Name -notmatch '(?i)installer' } |
-        Sort-Object LastWriteTime -Descending
+    Where-Object { $_.Name -notmatch '(?i)installer' } |
+    Sort-Object LastWriteTime -Descending
 }
 
 # Read version.json without extracting the whole jar.
@@ -191,8 +192,10 @@ function Get-McVersionFromJar {
             $json = $reader.ReadToEnd() | ConvertFrom-Json
             $reader.Close()
             return $json.id
-        } finally { $zip.Dispose() }
-    } catch { return $null }
+        }
+        finally { $zip.Dispose() }
+    }
+    catch { return $null }
 }
 
 function Get-ServerType {
@@ -201,7 +204,7 @@ function Get-ServerType {
 
     # Forge and NeoForge expose their launch arguments in libraries.
     $argFile = Get-ChildItem -Path (Join-Path $ServerRoot 'libraries') -Filter '*win_args.txt' -Recurse -ErrorAction SilentlyContinue |
-        Select-Object -First 1
+    Select-Object -First 1
     if ($argFile -and (Test-Path (Join-Path $ServerRoot 'user_jvm_args.txt'))) {
         return @{ Type = 'forge'; ArgFile = $argFile.FullName }
     }
@@ -277,7 +280,8 @@ function Get-JavaMajorVersion {
             if ($first -eq 1 -and $Matches[3]) { return [int]$Matches[3] }  # old "1.8.0_xxx" style
             return $first
         }
-    } catch {}
+    }
+    catch {}
     return $null
 }
 
@@ -363,7 +367,8 @@ function Get-TotalSystemRamMB {
     try {
         $bytes = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
         return [Math]::Round($bytes / 1MB)
-    } catch { return $null }
+    }
+    catch { return $null }
 }
 
 function Format-RamMB {
@@ -396,16 +401,19 @@ function Invoke-SetupWizard {
     if ($jars.Count -eq 1) {
         Write-StatusRow 'Detected' $jars[0].Name Cyan
         if (Read-YesNo -Prompt 'Use this file?' -Default $true) { $serverJar = $jars[0].Name }
-    } elseif ($jars.Count -gt 1) {
+    }
+    elseif ($jars.Count -gt 1) {
         Write-Host "  Multiple jar files found:" -ForegroundColor White
         for ($i = 0; $i -lt $jars.Count; $i++) { Write-Host ("  [{0}] {1}" -f $i, $jars[$i].Name) -ForegroundColor White }
         $idx = Read-Host "  Select a server jar by number"
         if ($idx -match '^\d+$' -and [int]$idx -ge 0 -and [int]$idx -lt $jars.Count) {
             $serverJar = $jars[[int]$idx].Name
-        } else {
+        }
+        else {
             Write-Warn2 "  That selection was not valid."
         }
-    } else {
+    }
+    else {
         Write-Warn2 "  No server jars were found in this folder."
     }
     while (-not $serverJar -or -not (Test-Path (Join-Path $ServerRoot $serverJar))) {
@@ -421,8 +429,8 @@ function Invoke-SetupWizard {
     Write-Section '2 / 4  Runtime check' 'Detecting server type, Minecraft version, and Java.'
     $serverType = Get-ServerType -JarPath (Join-Path $ServerRoot $serverJar)
     $versionInfo = Get-McVersionDetection -ServerType $serverType -JarPath (Join-Path $ServerRoot $serverJar)
-    $mcVersion  = $versionInfo.Version
-    $reqJava    = Get-RequiredJavaMajor -McVersion $mcVersion
+    $mcVersion = $versionInfo.Version
+    $reqJava = Get-RequiredJavaMajor -McVersion $mcVersion
 
     Write-StatusRow 'Server type' $serverType.Type
     if ($mcVersion) {
@@ -431,7 +439,7 @@ function Invoke-SetupWizard {
             Write-Warn2 '  Version was inferred from the filename; metadata was not available.'
         }
     }
-    else            { Write-Warn2 '  Minecraft version could not be detected from this jar.' }
+    else { Write-Warn2 '  Minecraft version could not be detected from this jar.' }
 
     $javaPath = $null
     if ($reqJava) {
@@ -441,12 +449,14 @@ function Invoke-SetupWizard {
             Write-Good "  Java $($best.Major) ready"
             Write-Host "  $($best.Path)" -ForegroundColor DarkGray
             $javaPath = $best.Path
-        } else {
+        }
+        else {
             Write-Bad "  No installed Java runtime satisfies Java $reqJava+."
             if ($installed) {
                 Write-Host "  Found on this system:" -ForegroundColor White
                 $installed | ForEach-Object { Write-Host "    Java $($_.Major)  $($_.Path)" -ForegroundColor DarkGray }
-            } else {
+            }
+            else {
                 Write-Host "  No Java installation found in the usual locations." -ForegroundColor White
             }
             Write-Host ""
@@ -457,18 +467,21 @@ function Invoke-SetupWizard {
                     Write-Good "  Java $manualMajor ready"
                     Write-Host "  $manualPath" -ForegroundColor DarkGray
                     $javaPath = $manualPath
-                } else {
+                }
+                else {
                     Write-Bad "  Java $manualMajor does not meet the Java $reqJava+ requirement."
                     Wait-ForEnter -Prompt 'Press Enter to exit'
                     exit 1
                 }
-            } else {
+            }
+            else {
                 Write-Bad "  Install Java $reqJava (for example, https://adoptium.net) and re-run this script."
                 Wait-ForEnter -Prompt 'Press Enter to exit'
                 exit 1
             }
         }
-    } else {
+    }
+    else {
         Write-Warn2 "  Java version check skipped; using the java command on PATH."
         $onPath = Get-Command java -ErrorAction SilentlyContinue
         if ($onPath) { $javaPath = $onPath.Source }
@@ -507,7 +520,7 @@ function Invoke-SetupWizard {
     # Set optional behavior.
     Write-Section '4 / 4  Server behavior' 'Set restart, GUI, and notification preferences.'
     $autoRestart = Read-YesNo -Prompt 'Auto-restart after a stop or crash?' -Default $false
-    $gui         = Read-YesNo -Prompt 'Enable the server GUI window?' -Default $false
+    $gui = Read-YesNo -Prompt 'Enable the server GUI window?' -Default $false
 
     $webhookUrl = $null
     $webhookStart = $null
@@ -627,17 +640,18 @@ function Send-WebhookMessage {
         $payload = @{
             username = 'Minecraft Server'
             embeds   = @(@{
-                title     = $Title
-                description = $Message
-                color     = $Color
-                footer    = @{ text = "mc-startup-script $CoreVersion" }
-                timestamp = (Get-Date).ToUniversalTime().ToString('o')
-            })
+                    title       = $Title
+                    description = $Message
+                    color       = $Color
+                    footer      = @{ text = "mc-startup-script $CoreVersion" }
+                    timestamp   = (Get-Date).ToUniversalTime().ToString('o')
+                })
         } | ConvertTo-Json -Depth 5
         $payloadBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
         Invoke-RestMethod -Uri $Url -Method Post -ContentType 'application/json; charset=utf-8' `
             -Body $payloadBytes -TimeoutSec 10 | Out-Null
-    } catch {
+    }
+    catch {
         Write-Warn2 "Webhook notification failed: $($_.Exception.Message)"
     }
 }
@@ -667,7 +681,8 @@ function Invoke-SelfUpdateCheck {
     param([switch]$Interactive)
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$RepoSlug/releases/latest" -TimeoutSec 8
-    } catch {
+    }
+    catch {
         if ($Interactive) { Write-Warn2 "Could not check for updates (offline or rate-limited). Continuing with $CoreVersion." }
         return
     }
@@ -703,13 +718,13 @@ function Invoke-SelfUpdateCheck {
     }
     if (-not (Read-YesNo -Prompt 'Download and install it now?' -Default $true)) { return }
 
-    $batAsset  = $release.assets | Where-Object { $_.name -eq 'START.bat' }
+    $batAsset = $release.assets | Where-Object { $_.name -eq 'START.bat' }
     $coreAsset = $release.assets | Where-Object { $_.name -eq 'core.ps1' }
     if (-not $batAsset -or -not $coreAsset) {
         Write-Warn2 "  The release is missing START.bat or core.ps1. Update skipped."
         return
     }
-    $batShaAsset  = $release.assets | Where-Object { $_.name -eq 'START.bat.sha256' }
+    $batShaAsset = $release.assets | Where-Object { $_.name -eq 'START.bat.sha256' }
     $coreShaAsset = $release.assets | Where-Object { $_.name -eq 'core.ps1.sha256' }
     if (-not $batShaAsset -or -not $coreShaAsset) {
         Write-Warn2 "  This release doesn't publish .sha256 checksums - updating without integrity verification."
@@ -789,7 +804,8 @@ function Import-LegacyConfig {
         if ($requiredJava) {
             $bestJava = Select-BestJava -RequiredMajor $requiredJava -Installed (Find-InstalledJavaRuntimes)
             if ($bestJava) { $javaPath = $bestJava.Path }
-        } else {
+        }
+        else {
             $onPath = Get-Command java -ErrorAction SilentlyContinue
             if ($onPath) { $javaPath = $onPath.Source }
         }
@@ -797,23 +813,24 @@ function Import-LegacyConfig {
 
         $config = [PSCustomObject]@{
             configVersion = $ConfigVersion
-            serverJar = $serverJar
-            serverType = $serverType.Type
-            mcVersion = $mcVersion
-            javaPath = $javaPath
-            maxRam = $values.maxRam
-            iniRam = $values.iniRam
-            autoRestart = ($values.autoRestart -match '^(?i:true|yes|y|1)$')
-            gui = ($values.GUI -match '^(?i:true|yes|y|1)$')
-            webhookUrl = $values.webhookURL
-            webhookStart = $values.webhookMessageStart
-            webhookStop = $values.webhookMessageStop
-            jvmFlags = $null
+            serverJar     = $serverJar
+            serverType    = $serverType.Type
+            mcVersion     = $mcVersion
+            javaPath      = $javaPath
+            maxRam        = $values.maxRam
+            iniRam        = $values.iniRam
+            autoRestart   = ($values.autoRestart -match '^(?i:true|yes|y|1)$')
+            gui           = ($values.GUI -match '^(?i:true|yes|y|1)$')
+            webhookUrl    = $values.webhookURL
+            webhookStart  = $values.webhookMessageStart
+            webhookStop   = $values.webhookMessageStop
+            jvmFlags      = $null
         }
         $config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
         Write-Good '  Existing v1 settings imported successfully.'
         return $config
-    } catch {
+    }
+    catch {
         Write-Warn2 '  The old configuration could not be imported. Starting setup instead.'
         return $null
     }
@@ -896,7 +913,8 @@ while ($true) {
     if ($restartTimestamps.Count -ge 5) {
         Write-Bad "  Server has stopped $($restartTimestamps.Count) times in 5 minutes. Pausing to prevent a crash loop."
         Start-CountdownPause -Seconds 60 -Label 'Resuming'
-    } else {
+    }
+    else {
         Start-Sleep -Seconds 2
     }
     Write-Host "  Restarting (attempt #$restartCount)..." -ForegroundColor Yellow
