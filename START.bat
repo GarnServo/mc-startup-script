@@ -18,7 +18,7 @@ if not exist ".\config" mkdir ".\config" >nul 2>&1
 if not exist "%coreScript%" (
     echo Core script not found - fetching it now...
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "try { $tmp = '%coreScript%.new'; (Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/%repo%/main/config/core.ps1' -UseBasicParsing).Content | Set-Content -Path $tmp -Encoding UTF8; Move-Item -Force $tmp '%coreScript%' } catch { Remove-Item '%coreScript%.new' -Force -ErrorAction SilentlyContinue; exit 1 }"
+        "try { $tmp = '%coreScript%.new'; (Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/%repo%/main/core.ps1' -UseBasicParsing).Content | Set-Content -Path $tmp -Encoding UTF8; Move-Item -Force $tmp '%coreScript%' } catch { Remove-Item '%coreScript%.new' -Force -ErrorAction SilentlyContinue; exit 1 }"
     if errorlevel 1 (
         echo.
         echo Failed to download config\core.ps1 - check your internet connection
