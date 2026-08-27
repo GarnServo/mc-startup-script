@@ -3,7 +3,7 @@ setlocal
 title Checking dependencies...
 
 REM ============================================================
-REM  mc-startup-script launcher (v2.2.0)
+REM  mc-startup-script launcher (v2.3.2)
 REM  This file only bootstraps config\core.ps1, which holds all
 REM  the actual logic. Distribute just this .bat - it fetches the
 REM  core script itself on first run.

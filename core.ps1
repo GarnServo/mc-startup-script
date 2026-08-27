@@ -11,8 +11,8 @@
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$CoreVersion = 'v2.2.0'
-$ConfigVersion = 2
+$CoreVersion = 'v2.3.2'
+$ConfigVersion = 3
 $RepoSlug = 'GarnServo/mc-startup-script'
 
 $ScriptRoot = Split-Path -Parent $PSCommandPath           # ...\config
@@ -55,6 +55,17 @@ function Read-YesNo {
     if ([string]::IsNullOrWhiteSpace($answer)) { return $Default }
     return $answer.Trim() -match '^(?i:y|yes)$'
 }
+function Read-Choice {
+    param([string]$Prompt, [string[]]$Options, [int]$Default = 0)
+    for ($i = 0; $i -lt $Options.Count; $i++) {
+        Write-Host ("    [{0}] {1}{2}" -f ($i + 1), $Options[$i], $(if ($i -eq $Default) { '  (default)' } else { '' })) -ForegroundColor White
+    }
+    $raw = Read-Host ("  {0} [1-{1}]" -f $Prompt, $Options.Count)
+    if ($raw -eq '') { return $Default }
+    if ($raw -match '^\d+$' -and [int]$raw -ge 1 -and [int]$raw -le $Options.Count) { return [int]$raw - 1 }
+    Write-Warn2 "  Invalid selection - using the default."
+    return $Default
+}
 function Wait-ForEnter {
     param([string]$Prompt = 'Press Enter to continue')
     [void](Read-Host ("  {0} [Enter]" -f $Prompt))
@@ -77,6 +88,14 @@ function Start-CountdownPause {
     }
     Write-Host ("`r  {0} now.{1}" -f $Label, (' ' * 12))
 }
+function Get-GcLabel {
+    param([string]$JvmFlags)
+    if (-not $JvmFlags) { return 'JVM default' }
+    if ($JvmFlags -match 'UseZGC') { return 'ZGC' }
+    if ($JvmFlags -match 'UseG1GC') { return 'G1GC' }
+    if ($JvmFlags -match 'UseShenandoahGC') { return 'Shenandoah' }
+    return 'Custom'
+}
 function Show-ServerDashboard {
     param($Config, [int]$RestartCount, [int]$JavaMajor)
     Write-Brand
@@ -86,6 +105,7 @@ function Show-ServerDashboard {
     Write-StatusRow 'Type' ("{0}{1}" -f $Config.serverType, $(if ($Config.mcVersion) { "  |  MC $($Config.mcVersion)" } else { '' }))
     Write-StatusRow 'Memory' "$($Config.iniRam) initial  |  $($Config.maxRam) max"
     Write-StatusRow 'Java' ("Java {0}" -f $JavaMajor)
+    Write-StatusRow 'GC' (Get-GcLabel -JvmFlags $Config.jvmFlags)
     Write-StatusRow 'Auto-restart' $(if ($Config.autoRestart) { 'Enabled' } else { 'Ask on exit' }) $(if ($Config.autoRestart) { 'Green' } else { 'Yellow' })
     Write-StatusRow 'Restarts' $RestartCount
     Write-Host ""
@@ -395,7 +415,7 @@ function Invoke-SetupWizard {
     Write-Host "  Let's get your server ready to launch." -ForegroundColor White
 
     # Pick the server jar.
-    Write-Section '1 / 4  Server file' 'Choose the runnable server jar in this folder.'
+    Write-Section '1 / 5  Server file' 'Choose the runnable server jar in this folder.'
     $jars = Find-CandidateJars
     $serverJar = $null
     if ($jars.Count -eq 1) {
@@ -426,7 +446,7 @@ function Invoke-SetupWizard {
     }
 
     # Work out the server type and runtime requirements.
-    Write-Section '2 / 4  Runtime check' 'Detecting server type, Minecraft version, and Java.'
+    Write-Section '2 / 5  Runtime check' 'Detecting server type, Minecraft version, and Java.'
     $serverType = Get-ServerType -JarPath (Join-Path $ServerRoot $serverJar)
     $versionInfo = Get-McVersionDetection -ServerType $serverType -JarPath (Join-Path $ServerRoot $serverJar)
     $mcVersion = $versionInfo.Version
@@ -442,6 +462,7 @@ function Invoke-SetupWizard {
     else { Write-Warn2 '  Minecraft version could not be detected from this jar.' }
 
     $javaPath = $null
+    $javaMajor = $null
     if ($reqJava) {
         $installed = Find-InstalledJavaRuntimes
         $best = Select-BestJava -RequiredMajor $reqJava -Installed $installed
@@ -449,6 +470,7 @@ function Invoke-SetupWizard {
             Write-Good "  Java $($best.Major) ready"
             Write-Host "  $($best.Path)" -ForegroundColor DarkGray
             $javaPath = $best.Path
+            $javaMajor = $best.Major
         }
         else {
             Write-Bad "  No installed Java runtime satisfies Java $reqJava+."
@@ -467,6 +489,7 @@ function Invoke-SetupWizard {
                     Write-Good "  Java $manualMajor ready"
                     Write-Host "  $manualPath" -ForegroundColor DarkGray
                     $javaPath = $manualPath
+                    $javaMajor = $manualMajor
                 }
                 else {
                     Write-Bad "  Java $manualMajor does not meet the Java $reqJava+ requirement."
@@ -484,11 +507,14 @@ function Invoke-SetupWizard {
     else {
         Write-Warn2 "  Java version check skipped; using the java command on PATH."
         $onPath = Get-Command java -ErrorAction SilentlyContinue
-        if ($onPath) { $javaPath = $onPath.Source }
+        if ($onPath) {
+            $javaPath = $onPath.Source
+            $javaMajor = Get-JavaMajorVersion -JavaExe $javaPath
+        }
     }
 
     # Set memory limits.
-    Write-Section '3 / 4  Memory' 'Choose how much RAM the server may use.'
+    Write-Section '3 / 5  Memory' 'Choose how much RAM the server may use.'
     $totalRam = Get-TotalSystemRamMB
     $suggestedMax = $null
     if ($totalRam) {
@@ -517,8 +543,35 @@ function Invoke-SetupWizard {
         }
     }
 
+    # Choose JVM/GC tuning.
+    Write-Section '4 / 5  JVM flags' 'Choose how the garbage collector is tuned.'
+    Write-Host "  Calculated works out G1GC vs generational ZGC (and tunes it) from your" -ForegroundColor DarkGray
+    Write-Host "  Java version, CPU cores, and allocated RAM." -ForegroundColor DarkGray
+    $flagChoice = Read-Choice -Prompt 'Choose an option' -Options @(
+        'Calculated - work out the optimal flags for this hardware'
+        'Custom - paste your own JVM flags'
+        'Skip - no extra flags, just the JVM defaults'
+    ) -Default 0
+    $jvmFlags = $null
+    switch ($flagChoice) {
+        0 {
+            $plan = Get-OptimalJvmPlan -JavaExe $javaPath -JavaMajor $javaMajor -HeapMB $maxRamMB -TotalRamMB $totalRam -ServerType $serverType.Type
+            Write-Good "  $($plan.GC)"
+            Write-Host "  $($plan.Reason)" -ForegroundColor DarkGray
+            if ($plan.Flags) { Write-Host "  $($plan.Flags)" -ForegroundColor DarkGray }
+            $jvmFlags = if ($plan.Flags) { $plan.Flags } else { $null }
+        }
+        1 {
+            $jvmFlags = Read-Host "  Paste your JVM flags (heap flags are added automatically - don't include -Xms/-Xmx)"
+            if (-not $jvmFlags) { $jvmFlags = $null }
+        }
+        2 {
+            Write-Host "  No extra JVM flags - the JVM will use its own defaults." -ForegroundColor DarkGray
+        }
+    }
+
     # Set optional behavior.
-    Write-Section '4 / 4  Server behavior' 'Set restart, GUI, and notification preferences.'
+    Write-Section '5 / 5  Server behavior' 'Set restart, GUI, and notification preferences.'
     $autoRestart = Read-YesNo -Prompt 'Auto-restart after a stop or crash?' -Default $false
     $gui = Read-YesNo -Prompt 'Enable the server GUI window?' -Default $false
 
@@ -540,6 +593,7 @@ function Invoke-SetupWizard {
     if ($mcVersion) { Write-StatusRow 'Minecraft' $mcVersion }
     Write-StatusRow 'Java' $(if ($javaPath) { $javaPath } else { 'java (PATH)' })
     Write-StatusRow 'Memory' "$(Format-RamMB $iniRamMB) initial  |  $(Format-RamMB $maxRamMB) max"
+    Write-StatusRow 'JVM flags' $(if ($jvmFlags) { $jvmFlags } else { 'None (JVM defaults)' })
     Write-StatusRow 'Auto-restart' $(if ($autoRestart) { 'Enabled' } else { 'Disabled' })
     Write-StatusRow 'GUI' $(if ($gui) { 'Enabled' } else { 'Disabled' })
     Write-StatusRow 'Webhook' $(if ($webhookUrl) { 'Configured' } else { 'Not configured' })
@@ -563,7 +617,7 @@ function Invoke-SetupWizard {
         webhookUrl    = $webhookUrl
         webhookStart  = $webhookStart
         webhookStop   = $webhookStop
-        jvmFlags      = $null   # null = use built-in modern defaults; set a string here to override
+        jvmFlags      = $jvmFlags   # null/empty = no extra flags; otherwise the chosen calculated or custom flag string
     }
     $config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
     Write-Section 'Setup complete' 'Your server is ready for launch.'
@@ -602,8 +656,115 @@ function Confirm-Eula {
 
 #region JVM flags
 
-function Get-DefaultJvmFlags {
-    '-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=130 -XX:+AlwaysPreTouch'
+# Sourced from current (2026) Minecraft-server JVM-tuning consensus across
+# multiple independent guides, cross-checked against the relevant JEPs:
+#   - G1GC tuned with "Aikar's flags" remains the well-tested default
+#     under ~12GB heap, and is the only sane choice below Java 21 (ZGC
+#     is non-generational there, which isn't suitable for MC's
+#     allocation pattern).
+#   - Generational ZGC (JEP 439, default since JEP 474/JDK 23) trades
+#     ~15-30% more memory and some throughput for near-zero pause
+#     times, and starts paying for that overhead around a 12GB+ heap.
+#     It's a concurrent collector, so it also needs CPU headroom - a
+#     2 vCPU box starves the main tick thread trying to run it.
+#   - JEP 490 (JDK 24) removed non-generational ZGC entirely. The
+#     -XX:+ZGenerational opt-in flag is only meaningful on Java 21-23;
+#     omit it on 24+ rather than risk passing a possibly-removed flag.
+#   - Modded servers (Forge/NeoForge/Fabric) allocate more per tick
+#     (custom entities, tile-entity processing) and measure better
+#     with a larger young generation / region size than vanilla.
+
+function Get-G1Flags {
+    param([string]$ServerType)
+    if ($ServerType -in @('forge', 'fabric')) {
+        return '-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:G1NewSizePercent=40 -XX:G1MaxNewSizePercent=50 -XX:G1HeapRegionSize=16M -XX:G1ReservePercent=15 -XX:G1MixedGCCountTarget=4 -XX:InitiatingHeapOccupancyPercent=20 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32 -XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1'
+    }
+    return '-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:G1HeapRegionSize=8M -XX:G1ReservePercent=20 -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4 -XX:InitiatingHeapOccupancyPercent=15 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32 -XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1'
+}
+
+function Get-ZgcFlags {
+    param([int]$JavaMajor)
+    $base = '-XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:+UnlockExperimentalVMOptions'
+    if ($JavaMajor -ge 21 -and $JavaMajor -le 23) { return "$base -XX:+ZGenerational" }
+    return $base   # Java 24+: generational is the only mode - no flag needed, and the flag may not exist
+}
+
+# Dry-runs a candidate flag set against the *actual* installed JVM before
+# committing to it - catches a build that's missing a GC (some minimal or
+# older JREs), or a flag removed in a newer Java release, rather than
+# discovering it when the real server jar fails to start.
+function Test-JvmFlagsSupported {
+    param([string]$JavaExe, [string[]]$Flags)
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $JavaExe
+        $psi.Arguments = (($Flags + '-version') -join ' ')
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $psi
+        [void]$process.Start()
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+        $process.Dispose()
+        $combined = ($stdout + $stderr)
+        $bad = $combined -match 'Unrecognized VM option|Error occurred during initialization|Could not create the Java Virtual Machine'
+        if ($exitCode -ne 0 -or $bad) {
+            $oneLine = ($combined.Trim() -replace '\r?\n', ' | ')
+            Write-Warn2 "    validation: exit $exitCode - $oneLine"
+        }
+        return ($exitCode -eq 0) -and (-not $bad)
+    }
+    catch {
+        Write-Warn2 "    validation threw: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Get-OptimalJvmPlan {
+    param([string]$JavaExe, [int]$JavaMajor, [int]$HeapMB, [int]$TotalRamMB, [string]$ServerType)
+
+    $cores = [Environment]::ProcessorCount
+    $heapGB = [Math]::Round($HeapMB / 1024, 1)
+
+    # ZGC needs 15-30% more memory than the heap alone for the same
+    # workload - make sure there's realistic headroom above the heap on
+    # total system RAM before recommending it, not just enough to launch.
+    $zgcMemoryHeadroomOk = (-not $TotalRamMB) -or ($TotalRamMB -ge ($HeapMB * 1.3 + 2048))
+    $zgcEligible = ($JavaMajor -ge 21) -and ($heapGB -ge 12) -and ($cores -ge 4) -and $zgcMemoryHeadroomOk
+
+    if ($zgcEligible) {
+        $flags = Get-ZgcFlags -JavaMajor $JavaMajor
+        $gcName = 'Generational ZGC'
+        $reason = "Java $JavaMajor, ${heapGB}G heap, $cores logical cores - enough heap and CPU headroom for ZGC's concurrent collection to be worth its overhead."
+    }
+    else {
+        $flags = Get-G1Flags -ServerType $ServerType
+        $gcName = 'G1GC (Aikar-tuned)'
+        $reason =
+        if ($JavaMajor -lt 21) { "Java $JavaMajor - generational ZGC needs Java 21+, so G1 is the right call here." }
+        elseif ($heapGB -lt 12) { "${heapGB}G heap is under the ~12G point where ZGC starts paying for its overhead - G1 wins below that." }
+        elseif ($cores -lt 4) { "$cores logical cores isn't enough headroom for a concurrent collector without starving the main tick - G1 is the safer choice." }
+        else { "Not enough memory headroom above the ${heapGB}G heap for ZGC's overhead - G1 is the safer choice." }
+    }
+
+    if (-not (Test-JvmFlagsSupported -JavaExe $JavaExe -Flags ($flags -split ' '))) {
+        Write-Warn2 "  $gcName flags weren't accepted by this Java install - falling back to plain G1GC."
+        $flags = '-XX:+UseG1GC'
+        $gcName = 'G1GC (JVM default tuning)'
+        $reason = "The calculated flags weren't recognized by this specific Java build, so this falls back to plain G1 with no extra tuning."
+        if (-not (Test-JvmFlagsSupported -JavaExe $JavaExe -Flags @('-XX:+UseG1GC'))) {
+            $flags = ''
+            $gcName = 'JVM default'
+            $reason = "Couldn't validate any GC flags against this Java install - using the JVM's own defaults."
+        }
+    }
+
+    return [PSCustomObject]@{ Flags = $flags; GC = $gcName; Reason = $reason }
 }
 #endregion
 
@@ -612,7 +773,10 @@ function Get-DefaultJvmFlags {
 function Get-LaunchArgs {
     param($Config)
 
-    $jvmFlags = if ($Config.jvmFlags) { $Config.jvmFlags } else { Get-DefaultJvmFlags }
+    # $null/empty means no extra flags at all (the "skip" wizard choice) -
+    # jvmFlags is always an explicit, fully-formed decision made at setup
+    # time now, not a silent built-in default.
+    $jvmFlags = if ($Config.jvmFlags) { $Config.jvmFlags -split ' ' } else { @() }
     $heap = @("-Xms$($Config.iniRam)", "-Xmx$($Config.maxRam)")
     $guiFlag = if ($Config.gui) { @() } else { @('--nogui') }
 
@@ -621,11 +785,11 @@ function Get-LaunchArgs {
             $serverType = Get-ServerType -JarPath (Join-Path $ServerRoot $Config.serverJar)
             if (-not $serverType.ArgFile) { throw "Forge/NeoForge argfile not found - has the install layout changed?" }
             $argFileRel = Resolve-Path $serverType.ArgFile -Relative
-            return $heap + ($jvmFlags -split ' ') + @('@user_jvm_args.txt', "@$argFileRel") + $guiFlag
+            return $heap + $jvmFlags + @('@user_jvm_args.txt', "@$argFileRel") + $guiFlag
         }
         default {
             # Plain and Fabric servers run as executable jars.
-            return $heap + ($jvmFlags -split ' ') + @('-jar', $Config.serverJar) + $guiFlag
+            return $heap + $jvmFlags + @('-jar', $Config.serverJar) + $guiFlag
         }
     }
 }
