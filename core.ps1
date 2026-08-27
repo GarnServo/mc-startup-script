@@ -10,7 +10,8 @@
 #>
 
 $ErrorActionPreference = 'Stop'
-$CoreVersion   = 'v2.1.0'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$CoreVersion   = 'v2.2.0'
 $ConfigVersion = 2
 $RepoSlug      = 'GarnServo/mc-startup-script'
 
@@ -514,6 +515,9 @@ function Invoke-SetupWizard {
     if (Read-YesNo -Prompt 'Enable Discord start/stop notifications?' -Default $false) {
         $webhookUrl = Read-Host "  Discord webhook URL"
         Write-Good "  Default formatted start and stop messages enabled."
+        Write-Warn2 "  Note: a webhook URL works like a password - anyone who has it can post to"
+        Write-Warn2 "  that channel. It's saved in plain text in StartupScript.json; don't share"
+        Write-Warn2 "  that file or commit it anywhere public."
     }
 
     # Review before saving.
@@ -668,6 +672,12 @@ function Invoke-SelfUpdateCheck {
         return
     }
     if (-not $release.tag_name) { return }
+
+    if ($release.tag_name -notmatch '^v\d+\.\d+\.\d+$') {
+        if ($Interactive) { Write-Warn2 "  Latest release tag '$($release.tag_name)' has an unexpected format - skipping update check for safety." }
+        return
+    }
+
     if ((Compare-ScriptVersion $release.tag_name $CoreVersion) -le 0) {
         if ($Interactive) { Write-Host "  mc-startup-script is up to date ($CoreVersion)." -ForegroundColor DarkGray }
         return
@@ -682,7 +692,11 @@ function Invoke-SelfUpdateCheck {
 
     Write-Section 'Update available' "$CoreVersion  ->  $($release.tag_name)"
     if ($release.body) {
-        ($release.body -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 4) | ForEach-Object {
+        # release.body is also free text - strip control/escape characters
+        # before it hits the console, since a crafted release description
+        # could otherwise use terminal escape sequences to spoof output.
+        $cleanBody = $release.body -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', ''
+        ($cleanBody -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 4) | ForEach-Object {
             Write-Host "  $_" -ForegroundColor DarkGray
         }
         Write-Host ""
@@ -695,28 +709,61 @@ function Invoke-SelfUpdateCheck {
         Write-Warn2 "  The release is missing START.bat or core.ps1. Update skipped."
         return
     }
+    $batShaAsset  = $release.assets | Where-Object { $_.name -eq 'START.bat.sha256' }
+    $coreShaAsset = $release.assets | Where-Object { $_.name -eq 'core.ps1.sha256' }
+    if (-not $batShaAsset -or -not $coreShaAsset) {
+        Write-Warn2 "  This release doesn't publish .sha256 checksums - updating without integrity verification."
+    }
 
     # Swap files from a separate process after this script exits. Updating a
     # running batch file in place can leave cmd.exe reading the wrong offset.
-    $updaterPath = Join-Path $ServerRoot 'Updater.bat'
-    $batUrl  = $batAsset.browser_download_url
-    $coreUrl = $coreAsset.browser_download_url
+    $updaterBatPath = Join-Path $ServerRoot 'Updater.bat'
+    $updaterPs1Path = Join-Path $ServerRoot 'Updater.ps1'
+
+    $updaterScript = @'
+param($BatUrl, $CoreUrl, $BatShaUrl, $CoreShaUrl)
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+function Test-Checksum {
+    param($FilePath, $ShaUrl)
+    if (-not $ShaUrl) { return $true }   # no checksum published for this asset - proceed unverified
+    try {
+        $expected = ((Invoke-WebRequest -Uri $ShaUrl -UseBasicParsing).Content -split '\s+')[0]
+        $actual = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash
+        return ($actual -ieq $expected)
+    } catch { return $true }   # couldn't fetch/verify - don't block the update on a network blip
+}
+try {
+    Invoke-WebRequest -Uri $BatUrl  -OutFile 'START.bat.new'        -UseBasicParsing
+    Invoke-WebRequest -Uri $CoreUrl -OutFile 'config\core.ps1.new'  -UseBasicParsing
+    if (-not (Test-Checksum 'START.bat.new' $BatShaUrl))        { throw 'START.bat checksum mismatch - refusing to install' }
+    if (-not (Test-Checksum 'config\core.ps1.new' $CoreShaUrl)) { throw 'core.ps1 checksum mismatch - refusing to install' }
+    Move-Item -Force 'START.bat.new' 'START.bat'
+    Move-Item -Force 'config\core.ps1.new' 'config\core.ps1'
+} catch {
+    Write-Host "Update failed: $($_.Exception.Message)" -ForegroundColor Red
+    Remove-Item 'START.bat.new','config\core.ps1.new' -Force -ErrorAction SilentlyContinue
+    exit 1
+}
+'@
+    $updaterScript | Set-Content -Path $updaterPs1Path -Encoding UTF8
+
     @"
 @echo off
 title Updating mc-startup-script to $($release.tag_name)...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -Uri '$batUrl' -OutFile 'START.bat.new' -UseBasicParsing; Invoke-WebRequest -Uri '$coreUrl' -OutFile 'config\core.ps1.new' -UseBasicParsing; Move-Item -Force 'START.bat.new' 'START.bat'; Move-Item -Force 'config\core.ps1.new' 'config\core.ps1' } catch { exit 1 }"
+powershell -NoProfile -ExecutionPolicy Bypass -File "Updater.ps1" -BatUrl "$($batAsset.browser_download_url)" -CoreUrl "$($coreAsset.browser_download_url)" -BatShaUrl "$($batShaAsset.browser_download_url)" -CoreShaUrl "$($coreShaAsset.browser_download_url)"
 if errorlevel 1 (
-    echo Update download failed - keeping the current version.
+    del "Updater.ps1" >nul 2>&1
     pause
     exit /b 1
 )
+del "Updater.ps1"
 start "" "START.bat"
 del "%~f0"
-"@ | Set-Content -Path $updaterPath -Encoding ASCII
+"@ | Set-Content -Path $updaterBatPath -Encoding ASCII
 
     Write-Good "  Downloading $($release.tag_name) and restarting..."
     Start-Sleep -Seconds 1
-    Start-Process -FilePath $updaterPath -WorkingDirectory $ServerRoot
+    Start-Process -FilePath $updaterBatPath -WorkingDirectory $ServerRoot
     exit 0
 }
 #endregion
