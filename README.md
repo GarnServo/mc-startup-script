@@ -40,13 +40,14 @@ No need to restart the script.
 
 <details>
   <summary>📸 Click to view screenshots</summary>
-  
+
+  #### Full Setup Wizard 
   ![Screenshot of the setup wizard](https://raw.githubusercontent.com/GarnServo/mc-startup-script/main/imgs/Setup-Wizard.png)
-
+  #### EULA Acceptance
   ![Screenshot of the EULA acceptance dialogue](https://raw.githubusercontent.com/GarnServo/mc-startup-script/main/imgs/EULA.png)
-
+  #### Server Start-up
   ![Screenshot of the server startup text](https://raw.githubusercontent.com/GarnServo/mc-startup-script/main/imgs/Server-Start.png)
-
+  #### Server Stop
   ![Screenshot of the server stop text](https://raw.githubusercontent.com/GarnServo/mc-startup-script/main/imgs/Server-Stop.png)
 </details>
 
