@@ -10,19 +10,19 @@
 #>
 
 $ErrorActionPreference = 'Stop'
-$CoreVersion   = 'v2.0.0'
+$CoreVersion   = 'v2.1.0'
 $ConfigVersion = 2
 $RepoSlug      = 'GarnServo/mc-startup-script'
 
 $ScriptRoot = Split-Path -Parent $PSCommandPath           # ...\config
 $ServerRoot = Split-Path -Parent $ScriptRoot               # server root, one level up
 $ConfigPath = Join-Path $ScriptRoot 'StartupScript.json'
+$JavaRequirementsCachePath = Join-Path $ScriptRoot 'JavaRequirements.json'
 Set-Location $ServerRoot
 Remove-Variable ScriptRoot
 
 #region Helpers
 
-function Write-Info    { param($Message) Write-Host $Message -ForegroundColor Cyan }
 function Write-Good    { param($Message) Write-Host $Message -ForegroundColor Green }
 function Write-Warn2   { param($Message) Write-Host $Message -ForegroundColor Yellow }
 function Write-Bad     { param($Message) Write-Host $Message -ForegroundColor Red }
@@ -58,15 +58,33 @@ function Wait-ForEnter {
     param([string]$Prompt = 'Press Enter to continue')
     [void](Read-Host ("  {0} [Enter]" -f $Prompt))
 }
+
+# Single source of truth for how an exit code is described, so the console
+# output and the Discord webhook never disagree with each other.
+function Get-ExitState {
+    param([int]$ExitCode)
+    if ($ExitCode -eq 0) { return [PSCustomObject]@{ Label = 'stopped normally'; Message = 'The server has stopped normally.'; Color = [ConsoleColor]::Green } }
+    return [PSCustomObject]@{ Label = 'crashed'; Message = 'The server has crashed.'; Color = [ConsoleColor]::Red }
+}
+
+# Visible countdown for pauses long enough that silence would look frozen.
+function Start-CountdownPause {
+    param([int]$Seconds, [string]$Label = 'Resuming')
+    for ($remaining = $Seconds; $remaining -gt 0; $remaining--) {
+        Write-Host ("`r  {0} in {1,3}s..." -f $Label, $remaining) -ForegroundColor DarkGray -NoNewline
+        Start-Sleep -Seconds 1
+    }
+    Write-Host ("`r  {0} now.{1}" -f $Label, (' ' * 12))
+}
 function Show-ServerDashboard {
-    param($Config, [int]$RestartCount)
+    param($Config, [int]$RestartCount, [int]$JavaMajor)
     Write-Brand
     Write-Host "  SERVER STATUS" -ForegroundColor Cyan
     Write-Rule
     Write-StatusRow 'Server' $Config.serverJar
     Write-StatusRow 'Type' ("{0}{1}" -f $Config.serverType, $(if ($Config.mcVersion) { "  |  MC $($Config.mcVersion)" } else { '' }))
     Write-StatusRow 'Memory' "$($Config.iniRam) initial  |  $($Config.maxRam) max"
-    Write-StatusRow 'Java' ("Java {0}" -f (Get-JavaMajorVersion -JavaExe $Config.javaPath))
+    Write-StatusRow 'Java' ("Java {0}" -f $JavaMajor)
     Write-StatusRow 'Auto-restart' $(if ($Config.autoRestart) { 'Enabled' } else { 'Ask on exit' }) $(if ($Config.autoRestart) { 'Green' } else { 'Yellow' })
     Write-StatusRow 'Restarts' $RestartCount
     Write-Host ""
@@ -92,8 +110,9 @@ function Compare-ScriptVersion {
 #endregion
 
 #region Minecraft and Java requirements
-# Minecraft 26.1+ uses the year-based version scheme and requires Java 25.
-function Get-RequiredJavaMajor {
+# Used when Mojang metadata is unavailable. Keep this for older installs and
+# unusual server versions that are not present in the official manifest.
+function Get-FallbackJavaMajor {
     param([string]$McVersion)
     if (-not $McVersion) { return $null }
     $parts = ($McVersion -split '\.') | ForEach-Object { [int]($_ -replace '\D', '0') }
@@ -113,6 +132,40 @@ function Get-RequiredJavaMajor {
     if ($maj -eq 1 -and $min -eq 16 -and $pat -ge 5)          { return 16 }
     if ($maj -eq 1 -and $min -ge 12 -and $min -le 16)         { return 11 }
     return 8
+}
+
+function Get-RequiredJavaMajor {
+    param([string]$McVersion)
+    if (-not $McVersion) { return $null }
+
+    try {
+        $cache = @()
+        if (Test-Path $JavaRequirementsCachePath) {
+            $cache = @(Get-Content $JavaRequirementsCachePath -Raw | ConvertFrom-Json)
+            $cached = $cache | Where-Object { $_.version -eq $McVersion } | Select-Object -First 1
+            if ($cached -and [int]$cached.majorVersion -gt 0) { return [int]$cached.majorVersion }
+        }
+
+        $manifest = Invoke-RestMethod -Uri 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json' -TimeoutSec 8
+        $entry = $manifest.versions | Where-Object { $_.id -eq $McVersion } | Select-Object -First 1
+        if ($entry -and $entry.url) {
+            $metadata = Invoke-RestMethod -Uri $entry.url -TimeoutSec 8
+            if ($metadata.javaVersion.majorVersion) {
+                $cache = @($cache | Where-Object { $_.version -ne $McVersion })
+                $cache += [PSCustomObject]@{
+                    version = $McVersion
+                    majorVersion = [int]$metadata.javaVersion.majorVersion
+                    checkedAt = (Get-Date).ToUniversalTime().ToString('o')
+                }
+                $cache | ConvertTo-Json -Depth 4 | Set-Content -Path $JavaRequirementsCachePath -Encoding UTF8
+                return [int]$metadata.javaVersion.majorVersion
+            }
+        }
+    } catch {
+        # A network failure should never prevent a known version from starting.
+    }
+
+    return Get-FallbackJavaMajor -McVersion $McVersion
 }
 #endregion
 
@@ -161,25 +214,38 @@ function Get-ServerType {
 
 function Get-DetectedMcVersion {
     param($ServerType, [string]$JarPath)
+    return (Get-McVersionDetection -ServerType $ServerType -JarPath $JarPath).Version
+}
+
+function Get-McVersionDetection {
+    param($ServerType, [string]$JarPath)
     switch ($ServerType.Type) {
         'plain' {
             $v = Get-McVersionFromJar -JarPath $JarPath
-            if ($v) { return $v }
+            if ($v) { return [PSCustomObject]@{ Version = $v; Source = 'metadata' } }
             # Fall back to the jar filename when version.json is unavailable.
-            if ((Split-Path -Leaf $JarPath) -match '(\d+\.\d+(\.\d+)?)') { return $Matches[1] }
-            return $null
+            if ((Split-Path -Leaf $JarPath) -match '(\d+\.\d+(\.\d+)?)') {
+                return [PSCustomObject]@{ Version = $Matches[1]; Source = 'filename' }
+            }
+            return [PSCustomObject]@{ Version = $null; Source = 'unknown' }
         }
         'fabric' {
-            if ((Split-Path -Leaf $JarPath) -match 'mc\.(\d+\.\d+(\.\d+)?)') { return $Matches[1] }
-            return $null
+            if ((Split-Path -Leaf $JarPath) -match 'mc\.(\d+\.\d+(\.\d+)?)') {
+                return [PSCustomObject]@{ Version = $Matches[1]; Source = 'filename' }
+            }
+            return [PSCustomObject]@{ Version = $null; Source = 'unknown' }
         }
         'forge' {
-            if ($ServerType.ArgFile -match '(\d+\.\d+(\.\d+)?)-[\d.]+') { return $Matches[1] }
-            if ($ServerType.ArgFile -match '(\d+\.\d+(\.\d+)?)') { return $Matches[1] }
-            return $null
+            if ($ServerType.ArgFile -match '(\d+\.\d+(\.\d+)?)-[\d.]+') {
+                return [PSCustomObject]@{ Version = $Matches[1]; Source = 'argfile' }
+            }
+            if ($ServerType.ArgFile -match '(\d+\.\d+(\.\d+)?)') {
+                return [PSCustomObject]@{ Version = $Matches[1]; Source = 'argfile' }
+            }
+            return [PSCustomObject]@{ Version = $null; Source = 'unknown' }
         }
     }
-    return $null
+    return [PSCustomObject]@{ Version = $null; Source = 'unknown' }
 }
 #endregion
 
@@ -353,11 +419,17 @@ function Invoke-SetupWizard {
     # Work out the server type and runtime requirements.
     Write-Section '2 / 4  Runtime check' 'Detecting server type, Minecraft version, and Java.'
     $serverType = Get-ServerType -JarPath (Join-Path $ServerRoot $serverJar)
-    $mcVersion  = Get-DetectedMcVersion -ServerType $serverType -JarPath (Join-Path $ServerRoot $serverJar)
+    $versionInfo = Get-McVersionDetection -ServerType $serverType -JarPath (Join-Path $ServerRoot $serverJar)
+    $mcVersion  = $versionInfo.Version
     $reqJava    = Get-RequiredJavaMajor -McVersion $mcVersion
 
     Write-StatusRow 'Server type' $serverType.Type
-    if ($mcVersion) { Write-StatusRow 'Minecraft' "$mcVersion  (Java $reqJava+)" }
+    if ($mcVersion) {
+        Write-StatusRow 'Minecraft' "$mcVersion  (Java $reqJava+)"
+        if ($versionInfo.Source -eq 'filename') {
+            Write-Warn2 '  Version was inferred from the filename; metadata was not available.'
+        }
+    }
     else            { Write-Warn2 '  Minecraft version could not be detected from this jar.' }
 
     $javaPath = $null
@@ -444,6 +516,23 @@ function Invoke-SetupWizard {
         Write-Good "  Default formatted start and stop messages enabled."
     }
 
+    # Review before saving.
+    Write-Section 'Review' 'Confirm these settings before saving.'
+    Write-StatusRow 'Server' $serverJar
+    Write-StatusRow 'Type' $serverType.Type
+    if ($mcVersion) { Write-StatusRow 'Minecraft' $mcVersion }
+    Write-StatusRow 'Java' $(if ($javaPath) { $javaPath } else { 'java (PATH)' })
+    Write-StatusRow 'Memory' "$(Format-RamMB $iniRamMB) initial  |  $(Format-RamMB $maxRamMB) max"
+    Write-StatusRow 'Auto-restart' $(if ($autoRestart) { 'Enabled' } else { 'Disabled' })
+    Write-StatusRow 'GUI' $(if ($gui) { 'Enabled' } else { 'Disabled' })
+    Write-StatusRow 'Webhook' $(if ($webhookUrl) { 'Configured' } else { 'Not configured' })
+    Write-Host ""
+    if (-not (Read-YesNo -Prompt 'Save this configuration?' -Default $true)) {
+        Write-Warn2 "  Starting over..."
+        Start-Sleep -Seconds 1
+        return Invoke-SetupWizard
+    }
+
     $config = [PSCustomObject]@{
         configVersion = $ConfigVersion
         serverJar     = $serverJar
@@ -463,6 +552,7 @@ function Invoke-SetupWizard {
     Write-Section 'Setup complete' 'Your server is ready for launch.'
     Write-Good "  Configuration saved"
     Write-Host "  $ConfigPath" -ForegroundColor DarkGray
+    Write-Host "  Tip: edit that file directly to fine-tune JVM flags or custom webhook text." -ForegroundColor DarkGray
     Start-Sleep -Seconds 1
     return $config
 }
@@ -480,7 +570,8 @@ function Confirm-Eula {
     Write-Brand -Title 'MINECRAFT EULA'
     Write-Host "  Running this server requires accepting Mojang's EULA." -ForegroundColor White
     Write-Host "  https://aka.ms/MinecraftEULA" -ForegroundColor Cyan
-    if (-not (Read-YesNo -Prompt "`nDo you accept Mojang's EULA?" -Default $false)) {
+    Write-Host ""
+    if (-not (Read-YesNo -Prompt "Do you accept Mojang's EULA?" -Default $false)) {
         Write-Bad "  EULA not accepted. Exiting."
         exit 1
     }
@@ -549,36 +640,53 @@ function Send-WebhookMessage {
 
 function Get-WebhookStartMessage {
     param($Config)
-    if ($Config.webhookStart -and $Config.webhookStart -ne 'Server starting...') { return $Config.webhookStart }
+    if ($Config.webhookStart -and $Config.webhookStart -notmatch '(?i)server (starting\.\.\.|has started)') {
+        return $Config.webhookStart
+    }
     return "The server is coming online.`n`n**Server**  ``$($Config.serverJar)```n**Minecraft**  ``$($Config.mcVersion)```n**Memory**  ``$($Config.maxRam)``"
 }
 
 function Get-WebhookStopMessage {
     param($Config, [int]$ExitCode)
-    if ($Config.webhookStop -and $Config.webhookStop -ne 'Server has stopped.') {
-        return "$($Config.webhookStop)`n`n**Exit code**  ``$ExitCode``"
+    $exitState = Get-ExitState -ExitCode $ExitCode
+    $state = $exitState.Label
+    if ($Config.webhookStop -and $Config.webhookStop -notmatch '(?i)server has stopped\.') {
+        return "$($Config.webhookStop)`n`n**Status**  ``$state```n**Exit code**  ``$ExitCode``"
     }
-    $state = if ($ExitCode -eq 0) { 'stopped normally' } else { 'stopped unexpectedly' }
-    return "The server has **$state**.`n`n**Server**  ``$($Config.serverJar)```n**Exit code**  ``$ExitCode``"
+    return "$($exitState.Message)`n`n**Server**  ``$($Config.serverJar)```n**Exit code**  ``$ExitCode``"
 }
 #endregion
 
 #region Self-update
 
 function Invoke-SelfUpdateCheck {
+    param([switch]$Interactive)
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$RepoSlug/releases/latest" -TimeoutSec 8
     } catch {
-        Write-Warn2 "Could not check for updates (offline or rate-limited). Continuing with $CoreVersion."
+        if ($Interactive) { Write-Warn2 "Could not check for updates (offline or rate-limited). Continuing with $CoreVersion." }
         return
     }
     if (-not $release.tag_name) { return }
     if ((Compare-ScriptVersion $release.tag_name $CoreVersion) -le 0) {
-        Write-Host "  mc-startup-script is up to date ($CoreVersion)." -ForegroundColor DarkGray
+        if ($Interactive) { Write-Host "  mc-startup-script is up to date ($CoreVersion)." -ForegroundColor DarkGray }
+        return
+    }
+
+    if (-not $Interactive) {
+        # Auto-restart loops run unattended - never block them on a prompt.
+        # Just flag it; the next interactive launch will offer to install.
+        Write-Warn2 "  Update available ($CoreVersion -> $($release.tag_name)) - will offer to install next time this is run interactively."
         return
     }
 
     Write-Section 'Update available' "$CoreVersion  ->  $($release.tag_name)"
+    if ($release.body) {
+        ($release.body -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 4) | ForEach-Object {
+            Write-Host "  $_" -ForegroundColor DarkGray
+        }
+        Write-Host ""
+    }
     if (-not (Read-YesNo -Prompt 'Download and install it now?' -Default $true)) { return }
 
     $batAsset  = $release.assets | Where-Object { $_.name -eq 'START.bat' }
@@ -615,8 +723,61 @@ del "%~f0"
 
 #region Main loop
 
+function Import-LegacyConfig {
+    $legacyPath = Join-Path (Split-Path -Parent $ConfigPath) 'StartupScript.conf'
+    if ((Test-Path $ConfigPath) -or -not (Test-Path $legacyPath)) { return $null }
+
+    try {
+        $values = @{}
+        foreach ($line in (Get-Content $legacyPath)) {
+            if ($line -match '^\s*([^#][^=]*)=(.*)$') { $values[$Matches[1].Trim()] = $Matches[2].Trim() }
+        }
+        if (-not $values.serverName -or -not (Test-Path (Join-Path $ServerRoot $values.serverName))) { return $null }
+
+        $serverJar = $values.serverName
+        $serverType = Get-ServerType -JarPath (Join-Path $ServerRoot $serverJar)
+        $mcVersion = Get-DetectedMcVersion -ServerType $serverType -JarPath (Join-Path $ServerRoot $serverJar)
+        $javaPath = $null
+        $requiredJava = Get-RequiredJavaMajor -McVersion $mcVersion
+        if ($requiredJava) {
+            $bestJava = Select-BestJava -RequiredMajor $requiredJava -Installed (Find-InstalledJavaRuntimes)
+            if ($bestJava) { $javaPath = $bestJava.Path }
+        } else {
+            $onPath = Get-Command java -ErrorAction SilentlyContinue
+            if ($onPath) { $javaPath = $onPath.Source }
+        }
+        if (-not $javaPath) { return $null }
+
+        $config = [PSCustomObject]@{
+            configVersion = $ConfigVersion
+            serverJar = $serverJar
+            serverType = $serverType.Type
+            mcVersion = $mcVersion
+            javaPath = $javaPath
+            maxRam = $values.maxRam
+            iniRam = $values.iniRam
+            autoRestart = ($values.autoRestart -match '^(?i:true|yes|y|1)$')
+            gui = ($values.GUI -match '^(?i:true|yes|y|1)$')
+            webhookUrl = $values.webhookURL
+            webhookStart = $values.webhookMessageStart
+            webhookStop = $values.webhookMessageStop
+            jvmFlags = $null
+        }
+        $config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
+        Write-Good '  Existing v1 settings imported successfully.'
+        return $config
+    } catch {
+        Write-Warn2 '  The old configuration could not be imported. Starting setup instead.'
+        return $null
+    }
+}
+
 function Get-Config {
-    if (-not (Test-Path $ConfigPath)) { return Invoke-SetupWizard }
+    if (-not (Test-Path $ConfigPath)) {
+        $legacy = Import-LegacyConfig
+        if ($legacy) { return $legacy }
+        return Invoke-SetupWizard
+    }
     $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json
     if ($cfg.configVersion -ne $ConfigVersion) {
         Write-Warn2 "Config schema is outdated - running setup again."
@@ -631,7 +792,7 @@ function Get-Config {
 }
 
 $Host.UI.RawUI.WindowTitle = 'Checking dependencies...'
-Invoke-SelfUpdateCheck
+Invoke-SelfUpdateCheck -Interactive
 $config = Get-Config
 Confirm-Eula
 
@@ -642,12 +803,13 @@ if (-not (Test-Path (Join-Path $ServerRoot $config.serverJar))) {
 
 $restartCount = 0
 $restartTimestamps = New-Object System.Collections.Generic.List[datetime]
+$javaMajor = Get-JavaMajorVersion -JavaExe $config.javaPath
 
 while ($true) {
     $launchArgs = Get-LaunchArgs -Config $config
     $Host.UI.RawUI.WindowTitle = "$($config.serverJar) | Restarts: $restartCount"
 
-    Show-ServerDashboard -Config $config -RestartCount $restartCount
+    Show-ServerDashboard -Config $config -RestartCount $restartCount -JavaMajor $javaMajor
 
     Send-WebhookMessage -Url $config.webhookUrl -Message (Get-WebhookStartMessage -Config $config) `
         -Title "$([char]::ConvertFromUtf32(0x1F7E2)) Server starting" -Color 5763719
@@ -660,7 +822,9 @@ while ($true) {
 
     Send-WebhookMessage -Url $config.webhookUrl -Message (Get-WebhookStopMessage -Config $config -ExitCode $exitCode) `
         -Title "$([char]::ConvertFromUtf32(0x1F534)) Server stopped" -Color 15548997
+    $exitState = Get-ExitState -ExitCode $exitCode
     Write-Section 'Server stopped' "Process exited with code $exitCode."
+    Write-Host ("  {0}" -f $exitState.Message) -ForegroundColor $exitState.Color
 
     if (-not $config.autoRestart) {
         Write-Host "  Automatic restart is disabled." -ForegroundColor DarkGray
@@ -668,7 +832,7 @@ while ($true) {
             Write-Host "  Exiting."
             break
         }
-        Invoke-SelfUpdateCheck
+        Invoke-SelfUpdateCheck -Interactive
         continue
     }
 
@@ -683,8 +847,8 @@ while ($true) {
         $restartTimestamps.RemoveAt(0)
     }
     if ($restartTimestamps.Count -ge 5) {
-        Write-Bad "  Server has stopped $($restartTimestamps.Count) times in 5 minutes. Pausing 60s to prevent a crash loop."
-        Start-Sleep -Seconds 60
+        Write-Bad "  Server has stopped $($restartTimestamps.Count) times in 5 minutes. Pausing to prevent a crash loop."
+        Start-CountdownPause -Seconds 60 -Label 'Resuming'
     } else {
         Start-Sleep -Seconds 2
     }

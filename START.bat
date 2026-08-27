@@ -3,7 +3,7 @@ setlocal
 title Checking dependencies...
 
 REM ============================================================
-REM  mc-startup-script launcher (v2.0.0)
+REM  mc-startup-script launcher (v2.1.0)
 REM  This file only bootstraps config\core.ps1, which holds all
 REM  the actual logic. Distribute just this .bat - it fetches the
 REM  core script itself on first run.
@@ -18,7 +18,7 @@ if not exist ".\config" mkdir ".\config" >nul 2>&1
 if not exist "%coreScript%" (
     echo Core script not found - fetching it now...
     powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-        "try { (Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/%repo%/main/config/core.ps1' -UseBasicParsing).Content | Set-Content -Path '%coreScript%' -Encoding UTF8 } catch { exit 1 }"
+        "try { $tmp = '%coreScript%.new'; (Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/%repo%/main/config/core.ps1' -UseBasicParsing).Content | Set-Content -Path $tmp -Encoding UTF8; Move-Item -Force $tmp '%coreScript%' } catch { Remove-Item '%coreScript%.new' -Force -ErrorAction SilentlyContinue; exit 1 }"
     if errorlevel 1 (
         echo.
         echo Failed to download config\core.ps1 - check your internet connection
