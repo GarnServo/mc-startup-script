@@ -1,0 +1,47 @@
+name: Generate release checksums
+
+# Runs when a release is published (manual publishing triggers this the
+# same as any other route). Downloads the actual uploaded assets - not
+# the repo source - and hashes those, since the whole point of a
+# checksum is verifying what was really published, not what the source
+# tree happened to contain at tag time.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  checksums:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.event.release.tag_name }}
+      REPO: ${{ github.repository }}
+
+    steps:
+      - name: Download release assets
+        run: |
+          gh release download "$TAG" --repo "$REPO" \
+            --pattern "START.bat" --pattern "core.ps1" --dir assets
+
+      - name: Verify both assets are present
+        run: |
+          test -f assets/START.bat || { echo "::error::START.bat missing from release $TAG - skipping checksums"; exit 1; }
+          test -f assets/core.ps1  || { echo "::error::core.ps1 missing from release $TAG - skipping checksums"; exit 1; }
+
+      - name: Compute SHA256 checksums
+        run: |
+          cd assets
+          sha256sum START.bat > START.bat.sha256
+          sha256sum core.ps1  > core.ps1.sha256
+          cat START.bat.sha256 core.ps1.sha256
+
+      - name: Upload checksums to the release
+        run: |
+          gh release upload "$TAG" \
+            assets/START.bat.sha256 assets/core.ps1.sha256 \
+            --repo "$REPO" \
+            --clobber
