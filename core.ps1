@@ -11,7 +11,7 @@
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$CoreVersion = 'v2.3.2'
+$CoreVersion = 'v2.3.3'
 $ConfigVersion = 3
 $RepoSlug = 'GarnServo/mc-startup-script'
 
@@ -888,10 +888,9 @@ function Invoke-SelfUpdateCheck {
         Write-Warn2 "  The release is missing START.bat or core.ps1. Update skipped."
         return
     }
-    $batShaAsset = $release.assets | Where-Object { $_.name -eq 'START.bat.sha256' }
-    $coreShaAsset = $release.assets | Where-Object { $_.name -eq 'core.ps1.sha256' }
-    if (-not $batShaAsset -or -not $coreShaAsset) {
-        Write-Warn2 "  This release doesn't publish .sha256 checksums - updating without integrity verification."
+    # GitHub computes and exposes a SHA256 digest for every release asset automatically (assets[].digest, "sha256:<hex>")
+    if (-not $batAsset.digest -or -not $coreAsset.digest) {
+        Write-Warn2 "  GitHub hasn't published a checksum for one of these assets - updating without integrity verification."
     }
 
     # Swap files from a separate process after this script exits. Updating a
@@ -900,22 +899,20 @@ function Invoke-SelfUpdateCheck {
     $updaterPs1Path = Join-Path $ServerRoot 'Updater.ps1'
 
     $updaterScript = @'
-param($BatUrl, $CoreUrl, $BatShaUrl, $CoreShaUrl)
+param($BatUrl, $CoreUrl, $BatDigest, $CoreDigest)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 function Test-Checksum {
-    param($FilePath, $ShaUrl)
-    if (-not $ShaUrl) { return $true }   # no checksum published for this asset - proceed unverified
-    try {
-        $expected = ((Invoke-WebRequest -Uri $ShaUrl -UseBasicParsing).Content -split '\s+')[0]
-        $actual = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash
-        return ($actual -ieq $expected)
-    } catch { return $true }   # couldn't fetch/verify - don't block the update on a network blip
+    param($FilePath, $ExpectedDigest)
+    if (-not $ExpectedDigest) { return $true }   # no digest published for this asset - proceed unverified
+    $expected = $ExpectedDigest -replace '^sha256:', ''
+    $actual = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash
+    return ($actual -ieq $expected)
 }
 try {
     Invoke-WebRequest -Uri $BatUrl  -OutFile 'START.bat.new'        -UseBasicParsing
     Invoke-WebRequest -Uri $CoreUrl -OutFile 'config\core.ps1.new'  -UseBasicParsing
-    if (-not (Test-Checksum 'START.bat.new' $BatShaUrl))        { throw 'START.bat checksum mismatch - refusing to install' }
-    if (-not (Test-Checksum 'config\core.ps1.new' $CoreShaUrl)) { throw 'core.ps1 checksum mismatch - refusing to install' }
+    if (-not (Test-Checksum 'START.bat.new' $BatDigest))        { throw 'START.bat checksum mismatch - refusing to install' }
+    if (-not (Test-Checksum 'config\core.ps1.new' $CoreDigest)) { throw 'core.ps1 checksum mismatch - refusing to install' }
     Move-Item -Force 'START.bat.new' 'START.bat'
     Move-Item -Force 'config\core.ps1.new' 'config\core.ps1'
 } catch {
@@ -929,7 +926,7 @@ try {
     @"
 @echo off
 title Updating mc-startup-script to $($release.tag_name)...
-powershell -NoProfile -ExecutionPolicy Bypass -File "Updater.ps1" -BatUrl "$($batAsset.browser_download_url)" -CoreUrl "$($coreAsset.browser_download_url)" -BatShaUrl "$($batShaAsset.browser_download_url)" -CoreShaUrl "$($coreShaAsset.browser_download_url)"
+powershell -NoProfile -ExecutionPolicy Bypass -File "Updater.ps1" -BatUrl "$($batAsset.browser_download_url)" -CoreUrl "$($coreAsset.browser_download_url)" -BatDigest "$($batAsset.digest)" -CoreDigest "$($coreAsset.digest)"
 if errorlevel 1 (
     del "Updater.ps1" >nul 2>&1
     pause
