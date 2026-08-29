@@ -11,7 +11,7 @@
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$CoreVersion = 'v2.3.3'
+$CoreVersion = 'v2.3.4'
 $ConfigVersion = 3
 $RepoSlug = 'GarnServo/mc-startup-script'
 
@@ -890,7 +890,8 @@ function Invoke-SelfUpdateCheck {
     }
     # GitHub computes and exposes a SHA256 digest for every release asset automatically (assets[].digest, "sha256:<hex>")
     if (-not $batAsset.digest -or -not $coreAsset.digest) {
-        Write-Warn2 "  GitHub hasn't published a checksum for one of these assets - updating without integrity verification."
+        Write-Bad "  GitHub hasn't published a checksum for one of these assets yet - refusing to update without integrity verification."
+        return
     }
 
     # Swap files from a separate process after this script exits. Updating a
@@ -903,7 +904,7 @@ param($BatUrl, $CoreUrl, $BatDigest, $CoreDigest)
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 function Test-Checksum {
     param($FilePath, $ExpectedDigest)
-    if (-not $ExpectedDigest) { return $true }   # no digest published for this asset - proceed unverified
+    if (-not $ExpectedDigest) { return $false }   # strict mode: no digest = fail closed
     $expected = $ExpectedDigest -replace '^sha256:', ''
     $actual = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash
     return ($actual -ieq $expected)
